@@ -441,6 +441,152 @@
         .status-value.green { color: #4ade80; }
         .status-value.yellow { color: #fbbf24; }
         .status-value.red { color: #f87171; }
+        
+        /* Full-screen Projection Page */
+        .projection-page {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, #FF9500 0%, #FF5E3A 100%);
+            z-index: 1000;
+            overflow-y: auto;
+            padding-bottom: 20px;
+        }
+        
+        .projection-page.active {
+            display: block;
+        }
+        
+        .proj-header {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(0,0,0,0.2);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .back-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 15px;
+        }
+        
+        .proj-header h1 {
+            color: #fff;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .proj-summary {
+            display: flex;
+            gap: 10px;
+            padding: 15px 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        .proj-summary-box {
+            flex: 1;
+            background: rgba(255,255,255,0.15);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+        }
+        
+        .proj-summary-box.low {
+            border-left: 4px solid #ef4444;
+        }
+        
+        .proj-summary-box.high {
+            border-left: 4px solid #22c55e;
+        }
+        
+        .proj-summary-label {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 4px;
+        }
+        
+        .proj-summary-value {
+            font-size: 18px;
+            font-weight: 700;
+        }
+        
+        .proj-summary-value.red { color: #fca5a5; }
+        .proj-summary-value.green { color: #86efac; }
+        
+        .proj-summary-date {
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            margin-top: 2px;
+        }
+        
+        .proj-list {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 0 15px;
+        }
+        
+        .proj-row {
+            display: flex;
+            align-items: center;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+        }
+        
+        .proj-row.is-low {
+            background: rgba(239, 68, 68, 0.25);
+        }
+        
+        .proj-row.is-high {
+            background: rgba(34, 197, 94, 0.25);
+        }
+        
+        .proj-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        
+        .proj-indicator.red { background: #ef4444; }
+        .proj-indicator.yellow { background: #f59e0b; }
+        .proj-indicator.green { background: #22c55e; }
+        
+        .proj-date {
+            flex: 1;
+            font-size: 14px;
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .proj-amount {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            margin-right: 10px;
+        }
+        
+        .proj-note {
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            max-width: 80px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -458,7 +604,7 @@
             </div>
             <div class="status-row">
                 <span class="status-label">Low Point</span>
-                <span id="low-point" class="status-value red">Loading...</span>
+                <span id="low-point" class="status-value yellow">Loading...</span>
             </div>
             <div class="status-row">
                 <span class="status-label">High Point</span>
@@ -562,6 +708,16 @@ Examples:
         </div>
     </div>
 
+    <!-- Full-Screen Projection Page -->
+    <div id="projection-page" class="projection-page">
+        <div class="proj-header">
+            <button class="back-btn" onclick="closeProjectionPage()">← Back</button>
+            <h1 id="proj-page-title">Cash Projection</h1>
+        </div>
+        <div class="proj-summary" id="proj-summary"></div>
+        <div class="proj-list" id="proj-list"></div>
+    </div>
+
     <script>
         const API_BASE = window.location.origin;
         const CODE = 'cflownk';
@@ -582,48 +738,62 @@ Examples:
             }
         }
         
-        function renderProjection(proj) {
-            const getColor = (balance, period) => {
+        function showProjectionPage(proj) {
+            const getColorClass = (balance, period) => {
                 if (period === 'monthly') {
-                    if (balance < 250000) return '#ef4444';
-                    if (balance < 300000) return '#f59e0b';
-                    return '#22c55e';
+                    if (balance < 250000) return 'red';
+                    if (balance < 300000) return 'yellow';
+                    return 'green';
                 } else {
-                    if (balance < 200000) return '#ef4444';
-                    if (balance < 250000) return '#f59e0b';
-                    return '#22c55e';
+                    if (balance < 200000) return 'red';
+                    if (balance < 250000) return 'yellow';
+                    return 'green';
                 }
             };
             
-            let html = `<div class="projection-card">`;
-            html += `<div class="projection-title">${proj.title}</div>`;
+            // Set title
+            document.getElementById('proj-page-title').textContent = proj.title;
             
-            // Summary row at top
-            html += `<div class="projection-summary">`;
-            html += `<div class="summary-item low"><span class="label">Low</span><span class="value">$${(proj.low.value/1000).toFixed(0)}K</span><span class="date">${proj.low.label}</span></div>`;
-            html += `<div class="summary-item high"><span class="label">High</span><span class="value">$${(proj.high.value/1000).toFixed(0)}K</span><span class="date">${proj.high.label}</span></div>`;
-            html += `</div>`;
+            // Build summary
+            const summaryHtml = `
+                <div class="proj-summary-box low">
+                    <div class="proj-summary-label">Low Point</div>
+                    <div class="proj-summary-value red">$${(proj.low.value/1000).toFixed(0)}K</div>
+                    <div class="proj-summary-date">${proj.low.label}</div>
+                </div>
+                <div class="proj-summary-box high">
+                    <div class="proj-summary-label">High Point</div>
+                    <div class="proj-summary-value green">$${(proj.high.value/1000).toFixed(0)}K</div>
+                    <div class="proj-summary-date">${proj.high.label}</div>
+                </div>
+            `;
+            document.getElementById('proj-summary').innerHTML = summaryHtml;
             
-            // Data rows
-            html += `<div class="projection-rows">`;
+            // Build rows
+            let rowsHtml = '';
             proj.rows.forEach(row => {
-                const color = getColor(row.balance, proj.period);
+                const colorClass = getColorClass(row.balance, proj.period);
                 const isLow = row.balance === proj.low.value;
                 const isHigh = row.balance === proj.high.value;
-                const highlight = isLow ? 'low-row' : (isHigh ? 'high-row' : '');
+                const highlight = isLow ? 'is-low' : (isHigh ? 'is-high' : '');
                 
-                html += `<div class="projection-row ${highlight}">`;
-                html += `<div class="row-indicator" style="background: ${color}"></div>`;
-                html += `<div class="row-date">${row.date}</div>`;
-                html += `<div class="row-balance">$${row.balance.toLocaleString()}</div>`;
-                if (row.note) {
-                    html += `<div class="row-note">${row.note}</div>`;
-                }
-                html += `</div>`;
+                rowsHtml += `
+                    <div class="proj-row ${highlight}">
+                        <div class="proj-indicator ${colorClass}"></div>
+                        <div class="proj-date">${row.date}</div>
+                        <div class="proj-amount">$${row.balance.toLocaleString()}</div>
+                        ${row.note ? `<div class="proj-note">${row.note}</div>` : ''}
+                    </div>
+                `;
             });
-            html += `</div></div>`;
+            document.getElementById('proj-list').innerHTML = rowsHtml;
             
-            return html;
+            // Show the page
+            document.getElementById('projection-page').classList.add('active');
+        }
+        
+        function closeProjectionPage() {
+            document.getElementById('projection-page').classList.remove('active');
         }
         
         async function askQuestion(question) {
@@ -643,7 +813,9 @@ Examples:
                 
                 // Check if it's a projection response
                 if (data.projection && data.projection.type === 'projection') {
-                    document.getElementById(`loading-${loadingId}`).innerHTML = renderProjection(data.projection);
+                    // Remove loading message and show full-screen projection
+                    document.getElementById(`loading-${loadingId}`).remove();
+                    showProjectionPage(data.projection);
                 } else {
                     document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${data.answer}</div>`;
                 }
@@ -727,8 +899,18 @@ Examples:
         
         async function getProjection(unit, count) {
             closeProjectionModal();
-            const question = `Show me ${count} ${unit} cash projection`;
-            askQuestion(question);
+            
+            try {
+                const question = `Show me ${count} ${unit} cash projection`;
+                const response = await fetch(`${API_BASE}/ask?code=${CODE}&question=${encodeURIComponent(question)}`);
+                const data = await response.json();
+                
+                if (data.projection && data.projection.type === 'projection') {
+                    showProjectionPage(data.projection);
+                }
+            } catch (e) {
+                alert('Failed to load projection. Please try again.');
+            }
         }
         
         async function requestUpdate() {
