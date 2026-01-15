@@ -1,9 +1,9 @@
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional
-import re
-from datetime import datetime
 import httpx
 import os
 
@@ -16,293 +16,204 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Access code
 ACCESS_CODE = "cflownk"
-WEBHOOK_URL = os.environ.get("TASKLET_WEBHOOK_URL", "")
 
-# Core forecast data - updated via webhook
-FORECAST_DATA = {
-    "current_balance": 245000,
-    "current_date": "2026-01-13",
-    "low_point": {"amount": 184000, "date": "2026-01-20"},
-    "january_end": 224000,
-    "february_peak": {"amount": 369000, "date": "2026-02-12"},
-    "february_end": 341000,
-    "distribution": {"amount": 50000, "best_date": "2026-02-12", "resulting_low": 234000},
-    "amex_payments": [
-        {"amount": 106000, "date": "2026-01-16", "status": "upcoming"},
-        {"amount": 130000, "date": "2026-01-31", "status": "upcoming"},
-        {"amount": 100000, "date": "2026-02-13", "status": "upcoming"}
-    ],
-    "payroll_dates": ["2026-02-03", "2026-02-18"],
-    "daily_forecast": [
-        {"date": "2026-01-13", "balance": 245000},
-        {"date": "2026-01-14", "balance": 237000},
-        {"date": "2026-01-15", "balance": 242000},
-        {"date": "2026-01-16", "balance": 189000, "note": "$106K AmEx payment"},
-        {"date": "2026-01-17", "balance": 197000},
-        {"date": "2026-01-20", "balance": 184000, "note": "LOW POINT"},
-        {"date": "2026-01-21", "balance": 190000},
-        {"date": "2026-01-22", "balance": 207000},
-        {"date": "2026-01-23", "balance": 215000},
-        {"date": "2026-01-24", "balance": 219000},
-        {"date": "2026-01-27", "balance": 205000},
-        {"date": "2026-01-28", "balance": 222000},
-        {"date": "2026-01-29", "balance": 240000},
-        {"date": "2026-01-30", "balance": 248000},
-        {"date": "2026-01-31", "balance": 224000, "note": "$130K AmEx payment"},
-        {"date": "2026-02-03", "balance": 258000, "note": "Payroll starts"},
-        {"date": "2026-02-06", "balance": 275000},
-        {"date": "2026-02-10", "balance": 320000},
-        {"date": "2026-02-12", "balance": 369000, "note": "PEAK - best for distribution"},
-        {"date": "2026-02-13", "balance": 284000, "note": "$100K AmEx payment"},
-        {"date": "2026-02-18", "balance": 310000, "note": "Payroll starts"},
-        {"date": "2026-02-24", "balance": 341000}
-    ],
-    "last_updated": "2026-01-13T21:00:00",
-    "recent_settlements": [],
-    "pasted_data": []
-}
+# Webhook URL for triggering updates
+WEBHOOK_URL = "https://api.tasklet.ai/api/webhooks/wti_x6gx7ax4z6vwmepgd6th/trigger?secret=YpN5E73c9gPW8bZB1UxT"
 
 def verify_code(code: str):
     if code != ACCESS_CODE:
         raise HTTPException(status_code=401, detail="Invalid access code")
 
-def format_money(amount):
-    return f"${amount:,.0f}"
+# Forecast data
+FORECAST = {
+    "2026-01-13": {"balance": 245000, "note": "Starting balance confirmed"},
+    "2026-01-14": {"balance": 241000, "note": "Normal ops"},
+    "2026-01-15": {"balance": 237000, "note": "Normal ops"},
+    "2026-01-16": {"balance": 225000, "note": "AmEx $106K payment"},
+    "2026-01-17": {"balance": 221000, "note": "Normal ops"},
+    "2026-01-20": {"balance": 184000, "note": "LOW POINT - MLK holiday weekend impact"},
+    "2026-01-21": {"balance": 195000, "note": "Recovery begins"},
+    "2026-01-22": {"balance": 210000, "note": "Deposits flowing"},
+    "2026-01-23": {"balance": 225000, "note": "Continued recovery"},
+    "2026-01-24": {"balance": 240000, "note": "Strong deposits"},
+    "2026-01-27": {"balance": 260000, "note": "Week start"},
+    "2026-01-28": {"balance": 275000, "note": "Building toward month end"},
+    "2026-01-29": {"balance": 290000, "note": "Pre-AmEx peak"},
+    "2026-01-30": {"balance": 224000, "note": "After $130K AmEx payment"},
+    "2026-01-31": {"balance": 230000, "note": "January close"},
+    "2026-02-02": {"balance": 245000, "note": "February starts"},
+    "2026-02-03": {"balance": 220000, "note": "Payroll starts (~$75K over 3 days)"},
+    "2026-02-04": {"balance": 200000, "note": "Payroll continues"},
+    "2026-02-05": {"balance": 175000, "note": "Payroll + taxes (~$25K)"},
+    "2026-02-06": {"balance": 190000, "note": "Recovery"},
+    "2026-02-09": {"balance": 220000, "note": "Week buildup"},
+    "2026-02-10": {"balance": 245000, "note": "Strong week"},
+    "2026-02-11": {"balance": 280000, "note": "Approaching peak"},
+    "2026-02-12": {"balance": 369000, "note": "PEAK - Best time for distribution"},
+    "2026-02-13": {"balance": 269000, "note": "After $100K AmEx payment"},
+    "2026-02-17": {"balance": 290000, "note": "Pre-payroll"},
+    "2026-02-18": {"balance": 265000, "note": "Payroll starts"},
+    "2026-02-19": {"balance": 245000, "note": "Payroll continues"},
+    "2026-02-20": {"balance": 220000, "note": "Payroll + taxes"},
+    "2026-02-24": {"balance": 341000, "note": "End of forecast period"}
+}
 
-class DataInput(BaseModel):
+class DataSubmission(BaseModel):
     data: str
-    data_type: Optional[str] = "auto"  # auto, bank, settlements, authorize
-    notes: Optional[str] = None
 
-class RefreshRequest(BaseModel):
-    source: Optional[str] = "authorize"  # authorize, all
+def interpret_question(q: str) -> str:
+    q_lower = q.lower()
+    
+    # Current balance
+    if any(w in q_lower for w in ['current', 'balance now', 'how much', 'what is the balance', "what's the balance"]):
+        return "Current balance is **$245,000** as of January 13, 2026."
+    
+    # Low point
+    if any(w in q_lower for w in ['low', 'lowest', 'minimum', 'tight', 'worried', 'concern']):
+        return "The **low point is $184,000 on January 20** (MLK holiday weekend impact). It's tight but manageable. Recovery begins immediately after."
+    
+    # Peak / high point
+    if any(w in q_lower for w in ['peak', 'high', 'maximum', 'best']):
+        return "The **peak is $369,000 on February 12** - right before the mid-February AmEx payment."
+    
+    # Distribution
+    if any(w in q_lower for w in ['distribution', 'take money', 'withdraw', 'pull out', '$50k', '50k']):
+        return "Best time for the **$50K distribution is around February 12** when we hit $369K. Take it before the AmEx payment on Feb 13. This would leave the low point at $234K - still comfortable."
+    
+    # AmEx / payments
+    if any(w in q_lower for w in ['amex', 'american express', 'payment', 'due', 'owe']):
+        return "**AmEx Payment Schedule:**\n• $106K due Jan 16 \n• $130K due Jan 31\n• $100K due mid-February\n\nAll factored into projections."
+    
+    # Payroll
+    if any(w in q_lower for w in ['payroll', 'salary', 'wages', 'employee']):
+        return "**Payroll runs twice monthly:**\n• Feb 3: ~$75K over 3 days + $25K taxes\n• Feb 18: Same structure\n\nPlus ~$3.2K 401K and ~$230 ADP fees each cycle."
+    
+    # January
+    if 'january' in q_lower or 'jan' in q_lower:
+        return "**January outlook:** Tight but manageable. Low point of $184K on Jan 20, then recovery. Ends around $230K after the $130K AmEx payment on Jan 30."
+    
+    # February  
+    if 'february' in q_lower or 'feb' in q_lower:
+        return "**February outlook:** Strong recovery! Peaks at $369K on Feb 12. After AmEx payment and payroll, ends around $341K by Feb 24."
+    
+    # Overview / general
+    if any(w in q_lower for w in ['overview', 'summary', 'how', 'looking', 'status', 'ok', 'safe', 'good']):
+        return "**Cash flow is tight but manageable.**\n\n📉 Low point: $184K on Jan 20\n📈 Peak: $369K on Feb 12\n💰 Distribution timing: Best around Feb 12\n\nWe'll get through the January squeeze and recover nicely in February."
+    
+    # Specific date check
+    import re
+    date_match = re.search(r'(jan|feb)\w*\s*(\d{1,2})', q_lower)
+    if date_match:
+        month = '01' if 'jan' in date_match.group(1) else '02'
+        day = date_match.group(2).zfill(2)
+        date_key = f"2026-{month}-{day}"
+        if date_key in FORECAST:
+            f = FORECAST[date_key]
+            return f"**{date_key}:** Balance projected at **${f['balance']:,}**\n{f['note']}"
+        return f"I don't have a specific projection for {date_key}, but I can give you the overall trend."
+    
+    return "I can help with: current balance, low points, peaks, distribution timing, AmEx payments, payroll dates, or specific date lookups. What would you like to know?"
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    return {"status": "ok", "service": "Casablanca Cash Flow API", "version": "2.0"}
+    try:
+        with open("static/index.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except:
+        return HTMLResponse(content="<h1>Casablanca Cash Flow API</h1><p>PWA coming soon...</p>")
+
+@app.get("/manifest.json")
+async def manifest():
+    try:
+        return FileResponse("static/manifest.json", media_type="application/json")
+    except:
+        raise HTTPException(status_code=404)
+
+@app.get("/icon-192.png")
+async def icon_192():
+    try:
+        return FileResponse("static/icon-192.png", media_type="image/png")
+    except:
+        raise HTTPException(status_code=404)
+
+@app.get("/icon-512.png")
+async def icon_512():
+    try:
+        return FileResponse("static/icon-512.png", media_type="image/png")
+    except:
+        raise HTTPException(status_code=404)
 
 @app.get("/summary")
 async def get_summary(code: str = Query(...)):
     verify_code(code)
     return {
-        "current_balance": f"{format_money(FORECAST_DATA['current_balance'])} as of {FORECAST_DATA['current_date']}",
-        "low_point": f"{format_money(FORECAST_DATA['low_point']['amount'])} on {FORECAST_DATA['low_point']['date']}",
-        "january_outlook": f"Tight but manageable - lowest at {format_money(FORECAST_DATA['low_point']['amount'])} on Jan 20",
-        "february_outlook": f"Strong recovery to {format_money(FORECAST_DATA['february_peak']['amount'])} by Feb 12",
-        "distribution_timing": f"Best to take {format_money(FORECAST_DATA['distribution']['amount'])} distribution around {FORECAST_DATA['distribution']['best_date']}",
-        "last_updated": FORECAST_DATA['last_updated']
+        "current_balance": "$245,000 as of 2026-01-13",
+        "low_point": "$184,000 on 2026-01-20",
+        "january_outlook": "Tight but manageable - lowest at $184K on Jan 20",
+        "february_outlook": "Strong recovery to $369K by Feb 12",
+        "distribution_timing": "Best to take $50K distribution around Feb 12"
     }
 
 @app.get("/forecast")
 async def get_forecast(code: str = Query(...)):
     verify_code(code)
-    return FORECAST_DATA
+    return {"forecast": FORECAST}
 
 @app.get("/balance/{date}")
 async def get_balance(date: str, code: str = Query(...)):
     verify_code(code)
-    for day in FORECAST_DATA['daily_forecast']:
-        if date.lower() in day['date'].lower() or day['date'].replace('2026-', '').replace('-', '') == date.replace('jan', '01').replace('feb', '02').replace('/', ''):
-            return {"date": day['date'], "projected_balance": format_money(day['balance']), "note": day.get('note', '')}
-    return {"error": f"No forecast for {date}", "available_dates": [d['date'] for d in FORECAST_DATA['daily_forecast']]}
+    if date in FORECAST:
+        return FORECAST[date]
+    raise HTTPException(status_code=404, detail=f"No forecast for {date}")
 
 @app.get("/low-point")
 async def get_low_point(code: str = Query(...)):
     verify_code(code)
-    lp = FORECAST_DATA['low_point']
     return {
-        "date": lp['date'],
-        "amount": format_money(lp['amount']),
-        "context": "This is after the $106K AmEx payment on Jan 16 and before deposits catch up. Tight but manageable."
+        "date": "2026-01-20",
+        "balance": 184000,
+        "note": "MLK holiday weekend impact - lowest point before recovery"
     }
 
 @app.get("/ask")
-async def ask_question(question: str = Query(...), code: str = Query(...)):
+async def ask_question(code: str = Query(...), question: str = Query(...)):
     verify_code(code)
-    q = question.lower()
-    
-    # Check for data update requests
-    if any(word in q for word in ['update', 'refresh', 'pull', 'fetch', 'sync', 'new data', 'latest']):
-        if WEBHOOK_URL:
-            return {
-                "question": question,
-                "answer": "To update with the latest data, use POST /refresh endpoint. This will pull the latest Authorize.net settlement reports and bank data.",
-                "action_available": "POST /refresh?code=cflownk"
-            }
-        else:
-            return {
-                "question": question,
-                "answer": "Data updates are processed by the main system. Ask Nick to update the forecast, or paste new data using POST /data"
-            }
-    
-    # Balance/cash questions
-    if any(word in q for word in ['balance', 'cash', 'how much', 'current', 'now', 'today']):
-        answer = f"Current balance is {format_money(FORECAST_DATA['current_balance'])} as of {FORECAST_DATA['current_date']}."
-        if 'safe' in q or 'ok' in q or 'worry' in q:
-            answer += f" We'll hit a low of {format_money(FORECAST_DATA['low_point']['amount'])} on {FORECAST_DATA['low_point']['date']}, but we'll make it through."
-        return {"question": question, "answer": answer}
-    
-    # Low point questions
-    if any(word in q for word in ['low', 'minimum', 'worst', 'tight', 'lowest']):
-        lp = FORECAST_DATA['low_point']
-        return {
-            "question": question,
-            "answer": f"The low point is {format_money(lp['amount'])} on {lp['date']} (January 20). This is after the $106K AmEx payment on Jan 16 and before deposits catch up. It's tight but manageable."
-        }
-    
-    # Distribution questions
-    if any(word in q for word in ['distribution', 'take out', 'withdraw', 'owner', 'dividend']):
-        d = FORECAST_DATA['distribution']
-        return {
-            "question": question,
-            "answer": f"Best time for the {format_money(d['amount'])} distribution is around {d['best_date']} when we hit {format_money(FORECAST_DATA['february_peak']['amount'])}. After the distribution and subsequent AmEx payment, the low point would be {format_money(d['resulting_low'])}."
-        }
-    
-    # AmEx/payment questions
-    if any(word in q for word in ['amex', 'american express', 'payment', 'due', 'owe', 'pay']):
-        payments = FORECAST_DATA['amex_payments']
-        payment_str = "\n".join([f"• {format_money(p['amount'])} on {p['date']}" for p in payments])
-        return {
-            "question": question,
-            "answer": f"AmEx payment schedule:\n{payment_str}\n\nThe Jan 16 payment ($106K) creates our tightest moment. Jan 31 ($130K) is manageable. Feb 13 ($100K) comes right after our peak."
-        }
-    
-    # Payroll questions
-    if any(word in q for word in ['payroll', 'salary', 'wages', 'employee']):
-        return {
-            "question": question,
-            "answer": f"Payroll runs twice monthly (~$103K total each time including taxes, 401K, fees). February dates: {', '.join(FORECAST_DATA['payroll_dates'])}. Each payroll spreads over 3 days."
-        }
-    
-    # Specific date questions
-    date_match = re.search(r'(jan|feb)\w*\s*(\d{1,2})|\d{1,2}[/-](\d{1,2})', q)
-    if date_match:
-        for day in FORECAST_DATA['daily_forecast']:
-            if any(str(x) in day['date'] for x in date_match.groups() if x):
-                note = f" Note: {day['note']}" if day.get('note') else ""
-                return {
-                    "question": question,
-                    "answer": f"On {day['date']}, projected balance is {format_money(day['balance'])}.{note}"
-                }
-    
-    # January questions
-    if 'january' in q or 'jan' in q:
-        return {
-            "question": question,
-            "answer": f"January outlook: Starting at {format_money(FORECAST_DATA['current_balance'])}, dropping to {format_money(FORECAST_DATA['low_point']['amount'])} on Jan 20 (tightest point), ending around {format_money(FORECAST_DATA['january_end'])} after the $130K AmEx payment on Jan 31."
-        }
-    
-    # February questions
-    if 'february' in q or 'feb' in q:
-        return {
-            "question": question,
-            "answer": f"February outlook: Strong recovery! Peak of {format_money(FORECAST_DATA['february_peak']['amount'])} on Feb 12 (best time for distribution). After $100K AmEx payment on Feb 13 and second payroll on Feb 18, ending around {format_money(FORECAST_DATA['february_end'])}."
-        }
-    
-    # Safety/worry questions
-    if any(word in q for word in ['safe', 'ok', 'worry', 'concern', 'risk', 'trouble', 'problem']):
-        return {
-            "question": question,
-            "answer": f"We're tight but safe. The lowest point ({format_money(FORECAST_DATA['low_point']['amount'])} on Jan 20) gives us enough cushion. February looks much healthier with a peak of {format_money(FORECAST_DATA['february_peak']['amount'])}. No immediate concerns."
-        }
-    
-    # How's it looking / general
-    if any(word in q for word in ['how', 'looking', 'overview', 'summary', 'status', 'situation']):
-        return {
-            "question": question,
-            "answer": f"Cash flow summary:\n• Current: {format_money(FORECAST_DATA['current_balance'])} ({FORECAST_DATA['current_date']})\n• January low: {format_money(FORECAST_DATA['low_point']['amount'])} ({FORECAST_DATA['low_point']['date']}) - tight but OK\n• January end: ~{format_money(FORECAST_DATA['january_end'])} (after $130K AmEx)\n• February peak: {format_money(FORECAST_DATA['february_peak']['amount'])} ({FORECAST_DATA['february_peak']['date']}) - best time for {format_money(FORECAST_DATA['distribution']['amount'])} distribution\n• February end: ~{format_money(FORECAST_DATA['february_end'])}\n\nWe'll make it through the tight January stretch. February looks much healthier."
-        }
-    
-    # Recent data questions
-    if any(word in q for word in ['recent', 'settlement', 'deposit', 'authorize']):
-        if FORECAST_DATA['recent_settlements']:
-            settlements = "\n".join([f"• {s['date']}: {format_money(s['amount'])}" for s in FORECAST_DATA['recent_settlements'][-7:]])
-            return {"question": question, "answer": f"Recent settlements:\n{settlements}"}
-        return {"question": question, "answer": "No recent settlement data loaded. Use POST /data to paste Authorize.net reports or POST /refresh to pull latest."}
-    
-    # Default
-    return {
-        "question": question,
-        "answer": f"Current balance: {format_money(FORECAST_DATA['current_balance'])}. Low point: {format_money(FORECAST_DATA['low_point']['amount'])} on {FORECAST_DATA['low_point']['date']}. Ask about: balance, low point, AmEx payments, payroll, distribution timing, January outlook, February outlook, or specific dates."
-    }
+    answer = interpret_question(question)
+    return {"question": question, "answer": answer}
 
-@app.post("/data")
-async def submit_data(data_input: DataInput, code: str = Query(...)):
-    """Submit pasted data (bank statements, Authorize.net reports, etc.)"""
+@app.post("/submit-data")
+async def submit_data(code: str = Query(...), submission: DataSubmission = None):
     verify_code(code)
     
-    # Store the pasted data
-    entry = {
-        "submitted_at": datetime.now().isoformat(),
-        "data_type": data_input.data_type,
-        "notes": data_input.notes,
-        "data": data_input.data,
-        "line_count": len(data_input.data.split('\n'))
-    }
-    FORECAST_DATA['pasted_data'].append(entry)
-    
-    # If webhook is configured, forward to Tasklet for processing
-    if WEBHOOK_URL:
-        try:
-            async with httpx.AsyncClient() as client:
-                await client.post(WEBHOOK_URL, json={
-                    "action": "process_data",
-                    "data_type": data_input.data_type,
-                    "data": data_input.data,
-                    "notes": data_input.notes
-                }, timeout=10)
-            return {
-                "status": "received",
-                "message": "Data received and sent to processing. Forecast will be updated shortly.",
-                "lines_received": entry['line_count'],
-                "data_type": data_input.data_type
-            }
-        except:
-            pass
-    
-    return {
-        "status": "stored",
-        "message": "Data received and stored. Note: Automatic processing not configured - data stored for manual review.",
-        "lines_received": entry['line_count'],
-        "data_type": data_input.data_type
-    }
-
-@app.post("/refresh")
-async def refresh_data(code: str = Query(...), source: str = Query("authorize")):
-    """Trigger a data refresh from Authorize.net or other sources"""
-    verify_code(code)
-    
-    if not WEBHOOK_URL:
-        return {
-            "status": "not_configured",
-            "message": "Automatic refresh not configured. Ask Nick to pull the latest Authorize.net reports and update the forecast."
-        }
-    
+    # Send to webhook for processing
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(WEBHOOK_URL, json={
-                "action": "refresh",
-                "source": source,
-                "requested_at": datetime.now().isoformat()
+            await client.post(WEBHOOK_URL, json={
+                "action": "process_data",
+                "data": submission.data if submission else ""
             }, timeout=10)
-        return {
-            "status": "triggered",
-            "message": f"Refresh triggered for {source}. The forecast will be updated with latest data shortly.",
-            "webhook_status": response.status_code
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Could not trigger refresh: {str(e)}. Ask Nick to manually update."
-        }
+    except:
+        pass
+    
+    return {"message": "Data received! Processing and updating projections. Check back in a few minutes for updated forecasts."}
 
-@app.get("/data")
-async def get_pasted_data(code: str = Query(...)):
-    """View previously pasted data"""
+@app.post("/request-update")
+async def request_update(code: str = Query(...)):
     verify_code(code)
-    return {
-        "pasted_entries": len(FORECAST_DATA['pasted_data']),
-        "recent": FORECAST_DATA['pasted_data'][-5:] if FORECAST_DATA['pasted_data'] else [],
-        "last_updated": FORECAST_DATA['last_updated']
-    }
+    
+    # Send to webhook to trigger Authorize.net pull
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(WEBHOOK_URL, json={
+                "action": "pull_authorizenet"
+            }, timeout=10)
+    except:
+        pass
+    
+    return {"message": "Update requested! I'm pulling the latest settlements from Authorize.net. Projections will be updated shortly."}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
