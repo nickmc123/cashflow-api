@@ -943,14 +943,25 @@
         <div class="modal-content">
             <h2>📋 Paste Financial Data</h2>
             <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px; font-size: 14px;">
-                Paste bank transactions, settlement reports, or any financial data. I'll process and update projections.
+                Paste bank transactions below. Optionally set the current balance.
             </p>
-            <textarea id="paste-data" placeholder="Paste your data here...
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 12px; align-items: center;">
+                <label style="color: rgba(255,255,255,0.8); font-size: 14px; white-space: nowrap;">Current Balance:</label>
+                <input type="text" id="current-balance-input" placeholder="e.g. 237000" 
+                    style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); 
+                    background: rgba(255,255,255,0.1); color: white; font-size: 16px;">
+                <button onclick="setCurrentBalance()" style="padding: 10px 15px; border-radius: 8px; 
+                    background: linear-gradient(135deg, #FF9500, #FF5E3A); color: white; border: none; 
+                    font-weight: 600; cursor: pointer; white-space: nowrap;">Set</button>
+            </div>
+            
+            <textarea id="paste-data" placeholder="Paste transactions here...
 
 Examples:
-- Bank transactions CSV
-- Authorize.net settlement report
-- Daily sales numbers"></textarea>
+- JAN 15, 2026 (date header)
+- Description  $1,234.56 (debit)
+- Deposit     +$5,000.00 (credit)"></textarea>
             <div class="modal-buttons">
                 <button class="modal-btn cancel" onclick="closePasteModal()">Cancel</button>
                 <button class="modal-btn submit" onclick="submitPastedData()">Submit Data</button>
@@ -1516,6 +1527,53 @@ Examples:
         function closePasteModal() {
             document.getElementById('paste-modal').classList.remove('active');
             document.getElementById('paste-data').value = '';
+            document.getElementById('current-balance-input').value = '';
+        }
+        
+        async function setCurrentBalance() {
+            const input = document.getElementById('current-balance-input').value.trim();
+            if (!input) {
+                alert('Please enter a balance amount');
+                return;
+            }
+            
+            // Parse the balance (handle formats like "237,000" or "$237000" or "237000")
+            const balance = parseFloat(input.replace(/[$,]/g, ''));
+            if (isNaN(balance)) {
+                alert('Invalid balance amount');
+                return;
+            }
+            
+            closePasteModal();
+            
+            const chat = document.getElementById('chat');
+            chat.innerHTML += `<div class="message user">💰 Setting balance to $${balance.toLocaleString()}...</div>`;
+            
+            const loadingId = Date.now();
+            chat.innerHTML += `<div class="message bot" id="loading-${loadingId}"><div class="loading"></div> Recalculating transaction history...</div>`;
+            
+            try {
+                const response = await fetch(`${API_BASE}/set-balance?code=${CODE}&balance=${balance}`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    document.getElementById(`loading-${loadingId}`).innerHTML = 
+                        `<div class="answer">✅ Balance set to $${balance.toLocaleString()}<br>` +
+                        `📊 Updated ${result.updated} transactions backward from ${result.anchor_date}</div>`;
+                    // Refresh the dashboard
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    document.getElementById(`loading-${loadingId}`).innerHTML = 
+                        `<div class="answer">❌ ${result.message}</div>`;
+                }
+            } catch (e) {
+                document.getElementById(`loading-${loadingId}`).innerHTML = 
+                    `<div class="answer">❌ Error setting balance: ${e.message}</div>`;
+            }
+            
+            chat.scrollTop = chat.scrollHeight;
         }
         
         async function submitPastedData() {
