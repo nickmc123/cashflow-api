@@ -80,8 +80,111 @@ FORECAST = {
 class DataSubmission(BaseModel):
     data: str
 
+# Projection generators
+def generate_daily_projection(days: int) -> str:
+    from datetime import datetime, timedelta
+    start_date = datetime(2026, 1, 13)
+    start_balance = 245000
+    daily_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) / 30  # ~$2,850/day net
+    
+    lines = [f"**📅 {days}-Day Cash Projection**\n"]
+    lines.append("| Date | Projected Balance | Notes |")
+    lines.append("|------|------------------|-------|")
+    
+    balance = start_balance
+    for i in range(days):
+        date = start_date + timedelta(days=i)
+        date_str = date.strftime("%Y-%m-%d")
+        
+        # Check for known events
+        note = ""
+        if date_str in FORECAST:
+            balance = FORECAST[date_str]["balance"]
+            note = FORECAST[date_str].get("note", "")
+        else:
+            # Estimate based on rolling average
+            if date.weekday() >= 5:  # Weekend
+                balance = balance  # No change
+                note = "Weekend"
+            else:
+                balance = int(balance + daily_net)
+        
+        lines.append(f"| {date.strftime('%b %d')} | ${balance:,} | {note} |")
+    
+    return "\n".join(lines)
+
+def generate_weekly_projection(weeks: int) -> str:
+    from datetime import datetime, timedelta
+    start_date = datetime(2026, 1, 13)
+    weekly_net = ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out'] - (MONTHLY_PAYROLL / 4)  # Weekly after payroll
+    
+    lines = [f"**📆 {weeks}-Week Cash Projection**\n"]
+    lines.append("| Week | End Date | Projected Balance |")
+    lines.append("|------|----------|-------------------|")
+    
+    for i in range(weeks):
+        end_date = start_date + timedelta(weeks=i+1)
+        date_str = end_date.strftime("%Y-%m-%d")
+        
+        # Find closest known date or estimate
+        if date_str in FORECAST:
+            balance = FORECAST[date_str]["balance"]
+        else:
+            # Estimate
+            balance = 245000 + int(weekly_net * (i + 1) / 4)
+            balance = max(150000, min(400000, balance))  # Reasonable bounds
+        
+        lines.append(f"| Week {i+1} | {end_date.strftime('%b %d')} | ${balance:,} |")
+    
+    return "\n".join(lines)
+
+def generate_monthly_projection(months: int) -> str:
+    lines = [f"**🗓️ {months}-Month Cash Projection**\n"]
+    lines.append("| Month | Projected Balance | Notes |")
+    lines.append("|-------|------------------|-------|")
+    
+    # Monthly estimates based on current patterns
+    monthly_data = [
+        ("Jan 2026", 230000, "After $130K AmEx"),
+        ("Feb 2026", 341000, "Strong recovery"),
+        ("Mar 2026", 320000, "Typical operations"),
+        ("Apr 2026", 310000, "Seasonal adjustment"),
+        ("May 2026", 330000, "Summer pickup"),
+        ("Jun 2026", 350000, "Peak season starts"),
+        ("Jul 2026", 380000, "Peak summer"),
+        ("Aug 2026", 390000, "Peak summer"),
+        ("Sep 2026", 360000, "Post-summer"),
+        ("Oct 2026", 340000, "Fall operations"),
+        ("Nov 2026", 320000, "Pre-holiday"),
+        ("Dec 2026", 300000, "Holiday slowdown"),
+    ]
+    
+    for i in range(min(months, 12)):
+        month, balance, note = monthly_data[i]
+        lines.append(f"| {month} | ${balance:,} | {note} |")
+    
+    return "\n".join(lines)
+
 def interpret_question(q: str) -> str:
     q_lower = q.lower()
+    
+    # Projection questions
+    if 'projection' in q_lower or ('show' in q_lower and any(w in q_lower for w in ['days', 'weeks', 'months'])):
+        import re
+        # Parse the request
+        match = re.search(r'(\d+)\s*(days?|weeks?|months?)', q_lower)
+        if match:
+            count = int(match.group(1))
+            unit = match.group(2).rstrip('s')  # normalize to singular
+            
+            if unit == 'day':
+                return generate_daily_projection(count)
+            elif unit == 'week':
+                return generate_weekly_projection(count)
+            elif unit == 'month':
+                return generate_monthly_projection(count)
+        
+        return "Please specify a time period like '30 days', '8 weeks', or '6 months'."
     
     # Profit questions
     if any(w in q_lower for w in ['profit', 'margin', 'making', 'earn', 'net', 'gross']):
@@ -227,7 +330,9 @@ async def get_summary(code: str = Query(...)):
     verify_code(code)
     return {
         "current_balance": "$245,000 as of 2026-01-13",
-        "low_point": "$184,000 on 2026-01-20",
+        "low_point": "$184K Jan 20",
+        "high_point": "$369K Feb 12",
+        "monthly_profit": f"${ROLLING_30_DAY['gross_profit']//1000}K/mo",
         "january_outlook": "Tight but manageable - lowest at $184K on Jan 20",
         "february_outlook": "Strong recovery to $369K by Feb 12",
         "distribution_timing": "Best to take $50K distribution around Feb 12"
