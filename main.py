@@ -147,26 +147,32 @@ def get_forecast_from_db():
     return forecast
 
 def get_today_balance():
-    """Get balance from most recent bank transaction, or fall back to forecast"""
-    # First try to get the most recent actual balance from transactions
+    """Get balance from most recent bank transaction if from today/yesterday, otherwise use forecast"""
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    
+    # First try to get the most recent actual balance from transactions (only if recent)
     conn = get_db()
     if conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT balance FROM bank_transactions ORDER BY date DESC, id DESC LIMIT 1")
+        cur.execute("SELECT date, balance FROM bank_transactions ORDER BY date DESC, id DESC LIMIT 1")
         row = cur.fetchone()
         cur.close()
         conn.close()
         if row and row['balance']:
-            return float(row['balance'])
+            tx_date = row['date']
+            # Only use transaction balance if it's from today or yesterday
+            if tx_date >= yesterday:
+                return float(row['balance'])
     
     # Fall back to forecast
     forecast = get_forecast_from_db()
-    today = datetime.now().strftime("%Y-%m-%d")
-    if today in forecast:
-        return forecast[today]["balance"]
+    today_str = today.strftime("%Y-%m-%d")
+    if today_str in forecast:
+        return forecast[today_str]["balance"]
     sorted_dates = sorted(forecast.keys())
     for d in sorted_dates:
-        if d >= today:
+        if d >= today_str:
             return forecast[d]["balance"]
     return forecast[sorted_dates[-1]]["balance"] if sorted_dates else 237000
 
