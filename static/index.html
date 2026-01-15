@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CashFlow">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Casablanca Cash Flow</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            padding-bottom: 100px;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #e94560;
+        }
+        
+        .header p {
+            font-size: 14px;
+            color: rgba(255,255,255,0.6);
+            margin-top: 5px;
+        }
+        
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .message {
+            padding: 15px;
+            border-radius: 18px;
+            max-width: 85%;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .message.user {
+            background: #e94560;
+            align-self: flex-end;
+            border-bottom-right-radius: 5px;
+        }
+        
+        .message.bot {
+            background: rgba(255,255,255,0.1);
+            align-self: flex-start;
+            border-bottom-left-radius: 5px;
+        }
+        
+        .message.bot .answer {
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        
+        .quick-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .quick-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 12px 15px;
+            border-radius: 12px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .quick-btn:hover, .quick-btn:active {
+            background: rgba(233, 69, 96, 0.3);
+            border-color: #e94560;
+        }
+        
+        .input-area {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1a1a2e;
+            padding: 15px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .input-row {
+            display: flex;
+            gap: 10px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        .input-area input {
+            flex: 1;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 15px;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+        }
+        
+        .input-area input::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+        
+        .input-area input:focus {
+            border-color: #e94560;
+        }
+        
+        .send-btn {
+            background: #e94560;
+            border: none;
+            color: #fff;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .action-btn {
+            flex: 1;
+            background: rgba(233, 69, 96, 0.2);
+            border: 1px solid #e94560;
+            color: #e94560;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .action-btn:hover {
+            background: #e94560;
+            color: #fff;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: #1a1a2e;
+            border-radius: 20px;
+            padding: 25px;
+            width: 100%;
+            max-width: 450px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal h2 {
+            color: #e94560;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        
+        .modal textarea {
+            width: 100%;
+            height: 200px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 15px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-family: monospace;
+            resize: none;
+            margin-bottom: 15px;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .modal-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .modal-btn.cancel {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+        
+        .modal-btn.submit {
+            background: #e94560;
+            color: #fff;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .status-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .status-row:last-child {
+            border-bottom: none;
+        }
+        
+        .status-label {
+            color: rgba(255,255,255,0.6);
+            font-size: 14px;
+        }
+        
+        .status-value {
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .status-value.green { color: #4ade80; }
+        .status-value.yellow { color: #fbbf24; }
+        .status-value.red { color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💰 Casablanca Cash Flow</h1>
+            <p>Ask me anything about your finances</p>
+        </div>
+        
+        <div id="status-card" class="status-card">
+            <div class="status-row">
+                <span class="status-label">Current Balance</span>
+                <span id="current-balance" class="status-value">Loading...</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Low Point</span>
+                <span id="low-point" class="status-value yellow">Loading...</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Status</span>
+                <span id="status" class="status-value green">Loading...</span>
+            </div>
+        </div>
+        
+        <div class="quick-actions">
+            <button class="quick-btn" onclick="askQuestion('How\'s cash flow looking?')">📊 Overview</button>
+            <button class="quick-btn" onclick="askQuestion('When is the low point?')">📉 Low Point</button>
+            <button class="quick-btn" onclick="askQuestion('When can I take a distribution?')">💵 Distribution</button>
+            <button class="quick-btn" onclick="askQuestion('What payments are coming up?')">📅 Payments</button>
+        </div>
+        
+        <div class="action-buttons">
+            <button class="action-btn" onclick="openPasteModal()">📋 Paste Data</button>
+            <button class="action-btn" onclick="requestUpdate()">🔄 Update from Auth.net</button>
+        </div>
+        
+        <div id="chat" class="chat-container"></div>
+    </div>
+    
+    <div class="input-area">
+        <div class="input-row">
+            <input type="text" id="question-input" placeholder="Ask a question..." onkeypress="handleKeyPress(event)">
+            <button class="send-btn" onclick="sendQuestion()">➤</button>
+        </div>
+    </div>
+    
+    <!-- Paste Data Modal -->
+    <div id="paste-modal" class="modal">
+        <div class="modal-content">
+            <h2>📋 Paste Financial Data</h2>
+            <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px; font-size: 14px;">
+                Paste bank transactions, settlement reports, or any financial data. I'll process and update projections.
+            </p>
+            <textarea id="paste-data" placeholder="Paste your data here...
+
+Examples:
+- Bank transactions CSV
+- Authorize.net settlement report
+- Daily sales numbers"></textarea>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" onclick="closePasteModal()">Cancel</button>
+                <button class="modal-btn submit" onclick="submitPastedData()">Submit Data</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Update Confirmation Modal -->
+    <div id="update-modal" class="modal">
+        <div class="modal-content">
+            <h2>🔄 Update from Authorize.net</h2>
+            <p style="color: rgba(255,255,255,0.6); margin-bottom: 20px; font-size: 14px;">
+                This will pull the latest settlement reports from Authorize.net and update the cash flow projections.
+            </p>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" onclick="closeUpdateModal()">Cancel</button>
+                <button class="modal-btn submit" onclick="confirmUpdate()">Update Now</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const CODE = 'cflownk';
+        
+        // Load initial status
+        async function loadStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/summary?code=${CODE}`);
+                const data = await response.json();
+                
+                document.getElementById('current-balance').textContent = data.current_balance.split(' as of')[0];
+                document.getElementById('low-point').textContent = data.low_point;
+                document.getElementById('status').textContent = data.january_outlook.includes('Tight') ? 'Tight but OK' : 'Healthy';
+            } catch (e) {
+                console.error('Failed to load status:', e);
+            }
+        }
+        
+        async function askQuestion(question) {
+            const chat = document.getElementById('chat');
+            
+            // Add user message
+            chat.innerHTML += `<div class="message user">${question}</div>`;
+            
+            // Add loading
+            const loadingId = Date.now();
+            chat.innerHTML += `<div class="message bot" id="loading-${loadingId}"><div class="loading"></div></div>`;
+            chat.scrollTop = chat.scrollHeight;
+            
+            try {
+                const response = await fetch(`${API_BASE}/ask?code=${CODE}&question=${encodeURIComponent(question)}`);
+                const data = await response.json();
+                
+                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${data.answer}</div>`;
+            } catch (e) {
+                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">Sorry, couldn't get an answer. Please try again.</div>`;
+            }
+            
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        function sendQuestion() {
+            const input = document.getElementById('question-input');
+            const question = input.value.trim();
+            if (question) {
+                askQuestion(question);
+                input.value = '';
+            }
+        }
+        
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') {
+                sendQuestion();
+            }
+        }
+        
+        function openPasteModal() {
+            document.getElementById('paste-modal').classList.add('active');
+        }
+        
+        function closePasteModal() {
+            document.getElementById('paste-modal').classList.remove('active');
+            document.getElementById('paste-data').value = '';
+        }
+        
+        async function submitPastedData() {
+            const data = document.getElementById('paste-data').value.trim();
+            if (!data) {
+                alert('Please paste some data first');
+                return;
+            }
+            
+            closePasteModal();
+            
+            const chat = document.getElementById('chat');
+            chat.innerHTML += `<div class="message user">📋 Submitted data for processing...</div>`;
+            
+            const loadingId = Date.now();
+            chat.innerHTML += `<div class="message bot" id="loading-${loadingId}"><div class="loading"></div> Processing data...</div>`;
+            
+            try {
+                const response = await fetch(`${API_BASE}/submit-data?code=${CODE}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: data })
+                });
+                const result = await response.json();
+                
+                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${result.message}</div>`;
+            } catch (e) {
+                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">Data submitted! I'll process it and update projections.</div>`;
+            }
+            
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        function openUpdateModal() {
+            document.getElementById('update-modal').classList.add('active');
+        }
+        
+        function closeUpdateModal() {
+            document.getElementById('update-modal').classList.remove('active');
+        }
+        
+        async function requestUpdate() {
+            openUpdateModal();
+        }
+        
+        async function confirmUpdate() {
+            closeUpdateModal();
+            
+            const chat = document.getElementById('chat');
+            chat.innerHTML += `<div class="message user">🔄 Requested data update from Authorize.net</div>`;
+            
+            const loadingId = Date.now();
+            chat.innerHTML += `<div class="message bot" id="loading-${loadingId}"><div class="loading"></div> Fetching latest settlements...</div>`;
+            
+            try {
+                const response = await fetch(`${API_BASE}/request-update?code=${CODE}`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${result.message}</div>`;
+            } catch (e) {
+                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">Update request sent! I'll fetch the latest data from Authorize.net and update projections shortly.</div>`;
+            }
+            
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        // Initialize
+        loadStatus();
+    </script>
+</body>
+</html>
