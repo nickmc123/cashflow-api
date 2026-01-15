@@ -587,6 +587,164 @@
             max-width: 80px;
             text-align: right;
         }
+        
+        /* Search Toggle Button */
+        .search-toggle-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 18px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+        
+        .search-toggle-btn.active {
+            background: rgba(255,255,255,0.4);
+        }
+        
+        /* Search Panel */
+        .search-panel {
+            display: none;
+            background: rgba(0,0,0,0.2);
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .search-panel.active {
+            display: block;
+        }
+        
+        .search-filters {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .filter-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .filter-group.full {
+            flex: 2;
+        }
+        
+        .filter-group label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+        
+        .filter-input {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: #fff;
+            font-size: 14px;
+            width: 100%;
+        }
+        
+        .filter-input::placeholder {
+            color: rgba(255,255,255,0.4);
+        }
+        
+        .filter-input.small {
+            padding: 10px 8px;
+        }
+        
+        .amount-range {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .amount-range span {
+            color: rgba(255,255,255,0.5);
+        }
+        
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 5px;
+        }
+        
+        .filter-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .filter-btn.clear {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+        
+        .filter-btn.search {
+            background: #fff;
+            color: #FF5E3A;
+        }
+        
+        /* Pagination */
+        .pagination-info {
+            text-align: center;
+            padding: 10px;
+            font-size: 13px;
+            color: rgba(255,255,255,0.7);
+        }
+        
+        .pagination-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 20px;
+            position: sticky;
+            bottom: 0;
+            background: linear-gradient(0deg, rgba(255,94,58,1) 0%, rgba(255,94,58,0.95) 100%);
+        }
+        
+        .page-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            min-width: 100px;
+        }
+        
+        .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        
+        .page-btn:not(:disabled):active {
+            transform: scale(0.95);
+        }
+        
+        .page-info {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            min-width: 70px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -721,10 +879,67 @@ Examples:
     <!-- Full-Screen Transactions Page -->
     <div id="transactions-page" class="projection-page">
         <div class="proj-header">
-            <button class="back-btn" onclick="closeTransactionsPage()">← Back</button>
-            <h1>Recent Transactions</h1>
+            <button class="back-btn" onclick="closeTransactionsPage()">← Done</button>
+            <h1>Transactions</h1>
+            <button class="search-toggle-btn" onclick="toggleSearchPanel()">🔍</button>
         </div>
+        
+        <!-- Search Panel (collapsible) -->
+        <div id="search-panel" class="search-panel">
+            <div class="search-filters">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label>From</label>
+                        <input type="date" id="filter-date-from" class="filter-input">
+                    </div>
+                    <div class="filter-group">
+                        <label>To</label>
+                        <input type="date" id="filter-date-to" class="filter-input">
+                    </div>
+                </div>
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label>Type</label>
+                        <select id="filter-type" class="filter-input">
+                            <option value="">All</option>
+                            <option value="credit">Credits</option>
+                            <option value="debit">Debits</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Amount</label>
+                        <div class="amount-range">
+                            <input type="number" id="filter-amount-min" placeholder="Min" class="filter-input small">
+                            <span>-</span>
+                            <input type="number" id="filter-amount-max" placeholder="Max" class="filter-input small">
+                        </div>
+                    </div>
+                </div>
+                <div class="filter-row">
+                    <div class="filter-group full">
+                        <label>Description</label>
+                        <input type="text" id="filter-description" placeholder="Search description..." class="filter-input">
+                    </div>
+                </div>
+                <div class="filter-actions">
+                    <button class="filter-btn clear" onclick="clearFilters()">Clear</button>
+                    <button class="filter-btn search" onclick="searchTransactions()">Search</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Pagination Info -->
+        <div class="pagination-info" id="pagination-info">Showing 0-0 of 0</div>
+        
+        <!-- Transactions List -->
         <div class="proj-list" id="transactions-list"></div>
+        
+        <!-- Pagination Controls -->
+        <div class="pagination-controls">
+            <button class="page-btn" id="prev-btn" onclick="prevPage()" disabled>← Previous</button>
+            <span class="page-info" id="page-info">Page 1</span>
+            <button class="page-btn" id="next-btn" onclick="nextPage()" disabled>Next →</button>
+        </div>
     </div>
 
     <script>
@@ -827,24 +1042,76 @@ Examples:
             document.getElementById('projection-page').classList.remove('active');
         }
         
-        async function showTransactions() {
+        // Transaction pagination state
+        let txCurrentOffset = 0;
+        let txTotal = 0;
+        const txLimit = 10;
+        let txFilters = {};
+        
+        function toggleSearchPanel() {
+            const panel = document.getElementById('search-panel');
+            const btn = document.querySelector('.search-toggle-btn');
+            panel.classList.toggle('active');
+            btn.classList.toggle('active');
+        }
+        
+        function clearFilters() {
+            document.getElementById('filter-date-from').value = '';
+            document.getElementById('filter-date-to').value = '';
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-amount-min').value = '';
+            document.getElementById('filter-amount-max').value = '';
+            document.getElementById('filter-description').value = '';
+            txFilters = {};
+            txCurrentOffset = 0;
+            loadTransactions();
+        }
+        
+        function searchTransactions() {
+            txFilters = {};
+            const dateFrom = document.getElementById('filter-date-from').value;
+            const dateTo = document.getElementById('filter-date-to').value;
+            const type = document.getElementById('filter-type').value;
+            const amountMin = document.getElementById('filter-amount-min').value;
+            const amountMax = document.getElementById('filter-amount-max').value;
+            const description = document.getElementById('filter-description').value;
+            
+            if (dateFrom) txFilters.date_from = dateFrom;
+            if (dateTo) txFilters.date_to = dateTo;
+            if (type) txFilters.type = type;
+            if (amountMin) txFilters.amount_min = amountMin;
+            if (amountMax) txFilters.amount_max = amountMax;
+            if (description) txFilters.description = description;
+            
+            txCurrentOffset = 0;
+            loadTransactions();
+        }
+        
+        async function loadTransactions() {
             const listEl = document.getElementById('transactions-list');
             listEl.innerHTML = '<div style="text-align:center;padding:40px;"><div class="loading"></div></div>';
-            document.getElementById('transactions-page').classList.add('active');
             
             try {
-                const response = await fetch(`${API_BASE}/transactions?code=${CODE}&limit=30`);
+                let url = `${API_BASE}/transactions?code=${CODE}&limit=${txLimit}&offset=${txCurrentOffset}`;
+                for (const [key, val] of Object.entries(txFilters)) {
+                    url += `&${key}=${encodeURIComponent(val)}`;
+                }
+                
+                const response = await fetch(url);
                 const data = await response.json();
                 
+                txTotal = data.total || 0;
+                
                 if (!data.transactions || data.transactions.length === 0) {
-                    listEl.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.6);">No transactions found. Paste bank data to add transactions.</div>';
+                    listEl.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.6);">No transactions found.</div>';
+                    updatePaginationUI();
                     return;
                 }
                 
                 let html = '';
                 for (const tx of data.transactions) {
-                    const date = new Date(tx.date);
-                    const dateStr = date.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'});
+                    const date = new Date(tx.date + 'T12:00:00');
+                    const dateStr = date.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: '2-digit'});
                     const isDebit = tx.debit > 0;
                     const amount = isDebit ? tx.debit : tx.credit;
                     const amountStr = '$' + amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
@@ -852,18 +1119,66 @@ Examples:
                     
                     html += `
                         <div class="proj-row">
-                            <div class="proj-date">${dateStr}</div>
-                            <div class="proj-balance" style="display:flex;flex-direction:column;align-items:flex-end;">
-                                <span style="color:${isDebit ? '#ff6b6b' : '#51cf66'};font-size:14px;">${isDebit ? '-' : '+'}${amountStr}</span>
-                                <span style="font-size:11px;color:rgba(255,255,255,0.5);">Bal: ${balanceStr}</span>
+                            <div class="proj-date" style="min-width:70px;">${dateStr}</div>
+                            <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+                                <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,0.9);">${tx.description || '-'}</div>
+                                <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">Bal: ${balanceStr}</div>
                             </div>
-                            <div class="proj-note" style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${tx.description || ''}</div>
+                            <div style="text-align:right;min-width:80px;">
+                                <span style="color:${isDebit ? '#ff6b6b' : '#51cf66'};font-size:15px;font-weight:600;">${isDebit ? '-' : '+'}${amountStr}</span>
+                            </div>
                         </div>`;
                 }
                 listEl.innerHTML = html;
+                updatePaginationUI();
             } catch (e) {
                 listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#ff6b6b;">Failed to load transactions</div>';
             }
+        }
+        
+        function updatePaginationUI() {
+            const start = txTotal > 0 ? txCurrentOffset + 1 : 0;
+            const end = Math.min(txCurrentOffset + txLimit, txTotal);
+            const page = Math.floor(txCurrentOffset / txLimit) + 1;
+            const totalPages = Math.ceil(txTotal / txLimit) || 1;
+            
+            document.getElementById('pagination-info').textContent = `Showing ${start}-${end} of ${txTotal}`;
+            document.getElementById('page-info').textContent = `Page ${page}/${totalPages}`;
+            
+            document.getElementById('prev-btn').disabled = txCurrentOffset === 0;
+            document.getElementById('next-btn').disabled = txCurrentOffset + txLimit >= txTotal;
+        }
+        
+        function prevPage() {
+            if (txCurrentOffset > 0) {
+                txCurrentOffset = Math.max(0, txCurrentOffset - txLimit);
+                loadTransactions();
+            }
+        }
+        
+        function nextPage() {
+            if (txCurrentOffset + txLimit < txTotal) {
+                txCurrentOffset += txLimit;
+                loadTransactions();
+            }
+        }
+        
+        async function showTransactions() {
+            txCurrentOffset = 0;
+            txFilters = {};
+            // Reset filter inputs
+            document.getElementById('filter-date-from').value = '';
+            document.getElementById('filter-date-to').value = '';
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-amount-min').value = '';
+            document.getElementById('filter-amount-max').value = '';
+            document.getElementById('filter-description').value = '';
+            // Hide search panel
+            document.getElementById('search-panel').classList.remove('active');
+            document.querySelector('.search-toggle-btn').classList.remove('active');
+            // Show page and load
+            document.getElementById('transactions-page').classList.add('active');
+            loadTransactions();
         }
         
         function closeTransactionsPage() {
