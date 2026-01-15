@@ -21,7 +21,7 @@ app.add_middleware(
 ACCESS_CODE = "cflownk"
 
 # Webhook URL for triggering updates
-WEBHOOK_URL = "https://api.tasklet.ai/api/webhooks/wti_x6gx7ax4z6vwmepgd6th/trigger?secret=YpN5E73c9gPW8bZB1UxT"
+WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=739e742528fc953b33f7fddb05705e9f"
 
 def verify_code(code: str):
     if code != ACCESS_CODE:
