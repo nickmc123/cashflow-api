@@ -162,10 +162,12 @@ class DataSubmission(BaseModel):
     data: str
 
 def parse_bank_data(raw_data: str) -> list:
-    """Parse bank transaction data from various formats"""
+    """Parse bank transaction data from various formats including messy web-copied data"""
     lines = raw_data.strip().split('\n')
     transactions = []
+    current_date = None
     
+    # First try tab-separated format
     for line in lines:
         line = line.strip()
         if not line:
@@ -201,7 +203,96 @@ def parse_bank_data(raw_data: str) -> list:
             except Exception as e:
                 continue
     
+    # If tab-separated worked, return those
+    if transactions:
+        return transactions
+    
+    # Try parsing messy web-copied format with date headers like "JAN 13, 2026 (17)"
+    # Pattern: date headers followed by transactions
+    date_pattern = re.compile(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s+(\d{4})', re.IGNORECASE)
+    amount_pattern = re.compile(r'^-?[\d,]+\.\d{2}$')
+    
+    pending_desc = None
+    pending_amount = None
+    last_balance = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Check for date header
+        date_match = date_pattern.search(line)
+        if date_match:
+            month_str = date_match.group(1).upper()
+            day = int(date_match.group(2))
+            year = int(date_match.group(3))
+            months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                     'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+            current_date = datetime(year, months[month_str], day)
+            continue
+        
+        # Check if this is an amount (e.g., "1,333.00" or "-325.00")
+        clean_line = line.replace(',', '').replace('$', '')
+        if amount_pattern.match(clean_line) or amount_pattern.match(line.replace(',', '')):
+            amount = float(clean_line)
+            
+            # If we have a pending description, this completes a transaction
+            if pending_desc and current_date:
+                if pending_amount is not None:
+                    # This is the balance
+                    transactions.append({
+                        'date': current_date,
+                        'description': pending_desc,
+                        'debit': abs(pending_amount) if pending_amount < 0 else 0,
+                        'credit': pending_amount if pending_amount > 0 else 0,
+                        'balance': amount
+                    })
+                    last_balance = amount
+                    pending_desc = None
+                    pending_amount = None
+                else:
+                    # This is the amount, next number will be balance
+                    pending_amount = amount
+            elif amount > 10000:  # Likely a balance
+                last_balance = amount
+            else:
+                pending_amount = amount
+            continue
+        
+        # Check if this looks like a description
+        if len(line) > 3 and not line.replace(',', '').replace('.', '').replace('-', '').isdigit():
+            # Save any pending transaction first
+            if pending_desc and pending_amount is not None and current_date and last_balance:
+                transactions.append({
+                    'date': current_date,
+                    'description': pending_desc,
+                    'debit': abs(pending_amount) if pending_amount < 0 else 0,
+                    'credit': pending_amount if pending_amount > 0 else 0,
+                    'balance': last_balance
+                })
+            pending_desc = line
+            pending_amount = None
+    
     return transactions
+
+
+def get_existing_transactions(conn, date: datetime.date) -> set:
+    """Get existing transaction signatures for deduplication"""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT date, description, debit, credit, balance 
+        FROM bank_transactions 
+        WHERE date >= %s
+    """, (date - timedelta(days=7),))  # Check last 7 days for duplicates
+    
+    existing = set()
+    for row in cur.fetchall():
+        # Create signature from date + description + amounts
+        sig = f"{row[0]}|{row[1][:30] if row[1] else ''}|{row[2]}|{row[3]}|{row[4]}"
+        existing.add(sig)
+    cur.close()
+    return existing
 
 @app.post("/submit-data")
 async def submit_data(submission: DataSubmission, code: str = Query(...)):
@@ -226,14 +317,29 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     
     cur = conn.cursor()
     
+    # Get existing transactions for deduplication
+    min_date = min(tx['date'] for tx in transactions).date()
+    existing = get_existing_transactions(conn, min_date)
+    
+    added_count = 0
+    skipped_count = 0
+    latest_balance = None
+    
     # Insert transactions and update forecast with actual balances
     for tx in transactions:
+        tx_date = tx['date'].date() if hasattr(tx['date'], 'date') else tx['date']
+        
+        # Check for duplicate
+        sig = f"{tx_date}|{tx['description'][:30] if tx['description'] else ''}|{tx['debit']}|{tx['credit']}|{tx['balance']}"
+        if sig in existing:
+            skipped_count += 1
+            continue
+        
         # Insert transaction
         cur.execute("""
             INSERT INTO bank_transactions (date, description, debit, credit, balance)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-        """, (tx['date'].date(), tx['description'], tx['debit'], tx['credit'], tx['balance']))
+        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx['balance']))
         
         # Update forecast with actual balance
         note = "Actual" if tx['balance'] else ""
@@ -249,7 +355,11 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
                 balance = EXCLUDED.balance,
                 note = CASE WHEN EXCLUDED.note != '' THEN EXCLUDED.note ELSE forecast.note END,
                 updated_at = CURRENT_TIMESTAMP
-        """, (tx['date'].date(), tx['balance'], note))
+        """, (tx_date, tx['balance'], note))
+        
+        existing.add(sig)  # Prevent duplicates within same submission
+        added_count += 1
+        latest_balance = tx['balance']
     
     conn.commit()
     cur.close()
@@ -257,10 +367,45 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     
     return {
         "status": "success",
-        "message": f"Processed {len(transactions)} transactions",
-        "transactions": len(transactions),
-        "latest_balance": transactions[-1]['balance'] if transactions else None
+        "message": f"Added {added_count} new transactions" + (f", skipped {skipped_count} duplicates" if skipped_count else ""),
+        "added": added_count,
+        "skipped": skipped_count,
+        "latest_balance": latest_balance
     }
+
+
+@app.get("/transactions")
+async def get_transactions(code: str = Query(...), limit: int = Query(default=20, le=100)):
+    """Get recent bank transactions"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"transactions": [], "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        SELECT date, description, debit, credit, balance, created_at
+        FROM bank_transactions
+        ORDER BY date DESC, id DESC
+        LIMIT %s
+    """, (limit,))
+    
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    transactions = []
+    for row in rows:
+        transactions.append({
+            "date": row['date'].strftime("%Y-%m-%d") if row['date'] else None,
+            "description": row['description'],
+            "debit": float(row['debit']) if row['debit'] else 0,
+            "credit": float(row['credit']) if row['credit'] else 0,
+            "balance": float(row['balance']) if row['balance'] else 0
+        })
+    
+    return {"transactions": transactions}
 
 # Projection generators
 def generate_daily_projection(days: int) -> dict:
