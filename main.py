@@ -177,25 +177,10 @@ def get_forecast_from_db():
     return forecast
 
 def get_today_balance():
-    """Get balance from most recent bank transaction if from today/yesterday, otherwise use forecast"""
+    """Get balance from forecast - transaction balances are for historical reference only"""
     today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
     
-    # First try to get the most recent actual balance from transactions (only if recent)
-    conn = get_db()
-    if conn:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT date, balance FROM bank_transactions ORDER BY date DESC, id DESC LIMIT 1")
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row and row['balance']:
-            tx_date = row['date']
-            # Only use transaction balance if it's from today or yesterday
-            if tx_date >= yesterday:
-                return float(row['balance'])
-    
-    # Fall back to forecast
+    # Use forecast for current balance display
     forecast = get_forecast_from_db()
     today_str = today.strftime("%Y-%m-%d")
     if today_str in forecast:
@@ -374,19 +359,8 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         sig = f"{row[0]}|{row[1][:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
         existing.add(sig)
     
-    # Get starting balance from most recent transaction
-    cur.execute("""
-        SELECT balance FROM bank_transactions 
-        WHERE balance > 0 
-        ORDER BY date DESC, id DESC 
-        LIMIT 1
-    """)
-    row = cur.fetchone()
-    if row and row[0]:
-        running_balance = float(row[0])
-    else:
-        # Fall back to forecast
-        running_balance = get_today_balance()
+    # Get starting balance from forecast (transaction balances are historical only)
+    running_balance = get_today_balance()
     
     # Sort transactions by date (oldest first) to calculate running balance
     transactions.sort(key=lambda x: x['date'])
