@@ -667,6 +667,27 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
     if 'profit' in q:
         return {"type": "answer", "text": f"30-day average profit: ${ROLLING_30_DAY['gross_profit']:,.0f}"}
     
+    # Payment queries
+    if 'payment' in q or 'due' in q or 'coming up' in q or 'upcoming' in q:
+        from datetime import date
+        today = date.today()
+        payments = [
+            {"date": "2026-01-16", "desc": "AmEx Payment", "amount": 106000},
+            {"date": "2026-01-31", "desc": "AmEx Payment", "amount": 130000},
+            {"date": "2026-02-03", "desc": "Payroll", "amount": 75000},
+            {"date": "2026-02-05", "desc": "Payroll Taxes + 401K", "amount": 28500},
+            {"date": "2026-02-13", "desc": "AmEx Payment", "amount": 100000},
+            {"date": "2026-02-18", "desc": "Payroll", "amount": 75000},
+            {"date": "2026-02-20", "desc": "Payroll Taxes + 401K", "amount": 28500},
+        ]
+        upcoming = [p for p in payments if p["date"] >= today.isoformat()]
+        if not upcoming:
+            return {"type": "answer", "text": "No upcoming payments scheduled."}
+        lines = ["📅 Upcoming Payments:"]
+        for p in upcoming[:5]:
+            lines.append(f"• {p['date']}: {p['desc']} - ${p['amount']:,.0f}")
+        return {"type": "answer", "text": "\n".join(lines)}
+    
     # Refresh/update requests
     if 'refresh' in q or 'update' in q:
         async with httpx.AsyncClient() as client:
