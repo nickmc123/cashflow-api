@@ -483,21 +483,21 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
                 if str(num) in q:
                     days = num
                     break
-            return generate_daily_projection(days)
+            return {"projection": generate_daily_projection(days)}
         elif 'week' in q:
             weeks = 8
             for num in [4, 8, 12]:
                 if str(num) in q:
                     weeks = num
                     break
-            return generate_weekly_projection(weeks)
+            return {"projection": generate_weekly_projection(weeks)}
         elif 'month' in q:
             months = 6
             for num in [6, 9, 12]:
                 if str(num) in q:
                     months = num
                     break
-            return generate_monthly_projection(months)
+            return {"projection": generate_monthly_projection(months)}
     
     # Balance queries
     if 'balance' in q or 'current' in q:
