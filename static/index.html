@@ -188,6 +188,123 @@
             color: #fff;
         }
         
+        /* Projection Card Styles */
+        .projection-card {
+            background: rgba(0,0,0,0.3);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        
+        .projection-title {
+            background: linear-gradient(135deg, #FF9500, #FF5E3A);
+            color: #fff;
+            font-weight: bold;
+            font-size: 16px;
+            padding: 12px 16px;
+            text-align: center;
+        }
+        
+        .projection-summary {
+            display: flex;
+            padding: 12px;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .summary-item {
+            flex: 1;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        .summary-item.low {
+            border-left: 4px solid #ef4444;
+        }
+        
+        .summary-item.high {
+            border-left: 4px solid #22c55e;
+        }
+        
+        .summary-item .label {
+            display: block;
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        
+        .summary-item .value {
+            display: block;
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .summary-item.low .value {
+            color: #ef4444;
+        }
+        
+        .summary-item.high .value {
+            color: #22c55e;
+        }
+        
+        .summary-item .date {
+            display: block;
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            margin-top: 2px;
+        }
+        
+        .projection-rows {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .projection-row {
+            display: grid;
+            grid-template-columns: 6px 1fr 1fr;
+            grid-template-rows: auto auto;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            gap: 0 10px;
+        }
+        
+        .projection-row.low-row {
+            background: rgba(239, 68, 68, 0.15);
+        }
+        
+        .projection-row.high-row {
+            background: rgba(34, 197, 94, 0.15);
+        }
+        
+        .row-indicator {
+            grid-row: span 2;
+            border-radius: 3px;
+            align-self: stretch;
+        }
+        
+        .row-date {
+            font-size: 13px;
+            color: rgba(255,255,255,0.9);
+            font-weight: 500;
+        }
+        
+        .row-balance {
+            font-size: 14px;
+            font-weight: bold;
+            color: #fff;
+            text-align: right;
+        }
+        
+        .row-note {
+            grid-column: 2 / -1;
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            margin-top: 2px;
+        }
+        
         .modal {
             display: none;
             position: fixed;
@@ -341,7 +458,7 @@
             </div>
             <div class="status-row">
                 <span class="status-label">Low Point</span>
-                <span id="low-point" class="status-value yellow">Loading...</span>
+                <span id="low-point" class="status-value red">Loading...</span>
             </div>
             <div class="status-row">
                 <span class="status-label">High Point</span>
@@ -465,6 +582,50 @@ Examples:
             }
         }
         
+        function renderProjection(proj) {
+            const getColor = (balance, period) => {
+                if (period === 'monthly') {
+                    if (balance < 250000) return '#ef4444';
+                    if (balance < 300000) return '#f59e0b';
+                    return '#22c55e';
+                } else {
+                    if (balance < 200000) return '#ef4444';
+                    if (balance < 250000) return '#f59e0b';
+                    return '#22c55e';
+                }
+            };
+            
+            let html = `<div class="projection-card">`;
+            html += `<div class="projection-title">${proj.title}</div>`;
+            
+            // Summary row at top
+            html += `<div class="projection-summary">`;
+            html += `<div class="summary-item low"><span class="label">Low</span><span class="value">$${(proj.low.value/1000).toFixed(0)}K</span><span class="date">${proj.low.label}</span></div>`;
+            html += `<div class="summary-item high"><span class="label">High</span><span class="value">$${(proj.high.value/1000).toFixed(0)}K</span><span class="date">${proj.high.label}</span></div>`;
+            html += `</div>`;
+            
+            // Data rows
+            html += `<div class="projection-rows">`;
+            proj.rows.forEach(row => {
+                const color = getColor(row.balance, proj.period);
+                const isLow = row.balance === proj.low.value;
+                const isHigh = row.balance === proj.high.value;
+                const highlight = isLow ? 'low-row' : (isHigh ? 'high-row' : '');
+                
+                html += `<div class="projection-row ${highlight}">`;
+                html += `<div class="row-indicator" style="background: ${color}"></div>`;
+                html += `<div class="row-date">${row.date}</div>`;
+                html += `<div class="row-balance">$${row.balance.toLocaleString()}</div>`;
+                if (row.note) {
+                    html += `<div class="row-note">${row.note}</div>`;
+                }
+                html += `</div>`;
+            });
+            html += `</div></div>`;
+            
+            return html;
+        }
+        
         async function askQuestion(question) {
             const chat = document.getElementById('chat');
             
@@ -480,7 +641,12 @@ Examples:
                 const response = await fetch(`${API_BASE}/ask?code=${CODE}&question=${encodeURIComponent(question)}`);
                 const data = await response.json();
                 
-                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${data.answer}</div>`;
+                // Check if it's a projection response
+                if (data.projection && data.projection.type === 'projection') {
+                    document.getElementById(`loading-${loadingId}`).innerHTML = renderProjection(data.projection);
+                } else {
+                    document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${data.answer}</div>`;
+                }
             } catch (e) {
                 document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">Sorry, couldn't get an answer. Please try again.</div>`;
             }
