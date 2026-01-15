@@ -210,10 +210,18 @@ class DataSubmission(BaseModel):
     data: str
 
 def parse_bank_data(raw_data: str) -> list:
-    """Parse bank transaction data from various formats including messy web-copied data"""
+    """Parse bank transaction data from various formats including messy web-copied data.
+    
+    Handles:
+    - Tab-separated format: Date\tDescription\tDebit\tCredit\tBalance
+    - Web-copied format with date headers like "JAN 13, 2026 (17)"
+    - Format without dates: defaults to today, looks for descriptions + amounts
+    
+    Date headers set the date for all following transactions until the next header.
+    """
     lines = raw_data.strip().split('\n')
     transactions = []
-    current_date = None
+    current_date = datetime.now()  # Default to today if no date header found
     
     # First try tab-separated format
     for line in lines:
