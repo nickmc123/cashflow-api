@@ -255,18 +255,22 @@ def parse_bank_data(raw_data: str) -> list:
     if transactions:
         return transactions
     
-    # Try parsing messy web-copied format with date headers like "JAN 13, 2026 (17)"
-    # Pattern: date headers followed by transactions
+    # Parse web-copied format with date headers like "JAN 13, 2026 (17)"
+    # Format: multi-line descriptions followed by amount, then "Pending" or nothing
     date_pattern = re.compile(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s+(\d{4})', re.IGNORECASE)
     amount_pattern = re.compile(r'^-?[\d,]+\.\d{2}$')
+    months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+             'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
     
-    pending_desc = None
-    pending_amount = None
-    last_balance = None
+    desc_lines = []
     
     for line in lines:
         line = line.strip()
         if not line:
+            continue
+        
+        # Skip "Pending" lines
+        if line.lower() == 'pending':
             continue
         
         # Check for date header
@@ -275,52 +279,35 @@ def parse_bank_data(raw_data: str) -> list:
             month_str = date_match.group(1).upper()
             day = int(date_match.group(2))
             year = int(date_match.group(3))
-            months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-                     'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
             current_date = datetime(year, months[month_str], day)
+            desc_lines = []  # Reset description
             continue
         
         # Check if this is an amount (e.g., "1,333.00" or "-325.00")
         clean_line = line.replace(',', '').replace('$', '')
-        if amount_pattern.match(clean_line) or amount_pattern.match(line.replace(',', '')):
+        if amount_pattern.match(clean_line):
             amount = float(clean_line)
             
-            # If we have a pending description, this completes a transaction
-            if pending_desc and current_date:
-                if pending_amount is not None:
-                    # This is the balance
-                    transactions.append({
-                        'date': current_date,
-                        'description': pending_desc,
-                        'debit': abs(pending_amount) if pending_amount < 0 else 0,
-                        'credit': pending_amount if pending_amount > 0 else 0,
-                        'balance': amount
-                    })
-                    last_balance = amount
-                    pending_desc = None
-                    pending_amount = None
-                else:
-                    # This is the amount, next number will be balance
-                    pending_amount = amount
-            elif amount > 10000:  # Likely a balance
-                last_balance = amount
-            else:
-                pending_amount = amount
-            continue
-        
-        # Check if this looks like a description
-        if len(line) > 3 and not line.replace(',', '').replace('.', '').replace('-', '').isdigit():
-            # Save any pending transaction first
-            if pending_desc and pending_amount is not None and current_date and last_balance:
+            # Create transaction if we have date and description
+            if current_date and desc_lines:
+                description = ' '.join(desc_lines)
                 transactions.append({
                     'date': current_date,
-                    'description': pending_desc,
-                    'debit': abs(pending_amount) if pending_amount < 0 else 0,
-                    'credit': pending_amount if pending_amount > 0 else 0,
-                    'balance': last_balance
+                    'description': description,
+                    'debit': abs(amount) if amount < 0 else 0,
+                    'credit': amount if amount > 0 else 0,
+                    'balance': 0  # No balance in web format
                 })
-            pending_desc = line
-            pending_amount = None
+            desc_lines = []  # Reset for next transaction
+            continue
+        
+        # Skip CHECK number-only lines (like "11858" after "CHECK")
+        if line.isdigit() and desc_lines and desc_lines[-1].upper() in ['CHECK', 'E-DEPOSIT']:
+            desc_lines.append(line)  # Include check number in description
+            continue
+        
+        # This is part of the description
+        desc_lines.append(line)
     
     return transactions
 
