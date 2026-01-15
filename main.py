@@ -628,6 +628,77 @@ async def delete_transactions(date_from: str = None, date_to: str = None, code: 
     return {"status": "success", "deleted": deleted, "message": f"Deleted {deleted} transactions"}
 
 
+class DeleteByIdsRequest(BaseModel):
+    ids: list[int]
+
+@app.post("/delete-transactions-by-ids")
+async def delete_transactions_by_ids(request: DeleteByIdsRequest, code: str = None):
+    """Delete transactions by their IDs"""
+    if code != ACCESS_CODE:
+        return {"status": "error", "message": "Invalid access code"}
+    
+    if not request.ids:
+        return {"status": "error", "message": "No IDs provided"}
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database unavailable"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Delete by IDs
+    placeholders = ','.join(['%s'] * len(request.ids))
+    cur.execute(f"DELETE FROM bank_transactions WHERE id IN ({placeholders})", request.ids)
+    deleted = cur.rowcount
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "deleted": deleted, "message": f"Deleted {deleted} transactions"}
+
+
+class TransactionMatch(BaseModel):
+    date: str
+    description: str
+    debit: float
+    credit: float
+
+class DeleteByMatchRequest(BaseModel):
+    transactions: list[TransactionMatch]
+
+@app.post("/delete-transactions-by-match")
+async def delete_transactions_by_match(request: DeleteByMatchRequest, code: str = None):
+    """Delete transactions by matching date, description prefix, and amounts"""
+    if code != ACCESS_CODE:
+        return {"status": "error", "message": "Invalid access code"}
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database unavailable"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    deleted = 0
+    
+    for tx in request.transactions:
+        # Match by date, description prefix (first 30 chars), and amounts
+        cur.execute("""
+            DELETE FROM bank_transactions 
+            WHERE date = %s 
+            AND LEFT(description, 30) = %s
+            AND debit = %s 
+            AND credit = %s
+            LIMIT 1
+        """, (tx.date, tx.description[:30], tx.debit, tx.credit))
+        deleted += cur.rowcount
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "deleted": deleted, "message": f"Deleted {deleted} transactions"}
+
+
 def update_forecast_balance(new_balance: float):
     """Update the forecast starting balance"""
     conn = get_db()
@@ -709,7 +780,7 @@ async def get_transactions(
     
     # Get paginated results
     query = f"""
-        SELECT date, description, debit, credit, balance, created_at
+        SELECT id, date, description, debit, credit, balance, created_at
         FROM bank_transactions
         {where_clause}
         ORDER BY date DESC, id DESC
@@ -724,6 +795,7 @@ async def get_transactions(
     transactions = []
     for row in rows:
         transactions.append({
+            "id": row['id'],
             "date": row['date'].strftime("%Y-%m-%d") if row['date'] else None,
             "description": row['description'],
             "debit": float(row['debit']) if row['debit'] else 0,
