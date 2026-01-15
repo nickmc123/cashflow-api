@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="CashFlow">
-    <meta name="theme-color" content="#1a1a2e">
+    <meta name="theme-color" content="#FF9500">
     <title>Casablanca Cash Flow</title>
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
@@ -19,7 +19,7 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #FF9500 0%, #FF5E3A 100%);
             min-height: 100vh;
             color: #fff;
         }
@@ -34,19 +34,25 @@
         .header {
             text-align: center;
             padding: 20px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(255,255,255,0.2);
             margin-bottom: 20px;
         }
         
+        .header-logo {
+            max-width: 200px;
+            height: auto;
+            margin-bottom: 10px;
+        }
+        
         .header h1 {
-            font-size: 24px;
+            font-size: 20px;
             font-weight: 600;
-            color: #e94560;
+            color: #fff;
         }
         
         .header p {
             font-size: 14px;
-            color: rgba(255,255,255,0.6);
+            color: rgba(255,255,255,0.8);
             margin-top: 5px;
         }
         
@@ -70,13 +76,13 @@
         }
         
         .message.user {
-            background: #e94560;
+            background: rgba(0,0,0,0.3);
             align-self: flex-end;
             border-bottom-right-radius: 5px;
         }
         
         .message.bot {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.25);
             align-self: flex-start;
             border-bottom-left-radius: 5px;
         }
@@ -94,8 +100,8 @@
         }
         
         .quick-btn {
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.25);
+            border: 1px solid rgba(255,255,255,0.3);
             color: #fff;
             padding: 12px 15px;
             border-radius: 12px;
@@ -105,8 +111,8 @@
         }
         
         .quick-btn:hover, .quick-btn:active {
-            background: rgba(233, 69, 96, 0.3);
-            border-color: #e94560;
+            background: rgba(0,0,0,0.2);
+            border-color: rgba(255,255,255,0.5);
         }
         
         .input-area {
@@ -114,9 +120,9 @@
             bottom: 0;
             left: 0;
             right: 0;
-            background: #1a1a2e;
+            background: rgba(200, 80, 0, 0.95);
             padding: 15px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid rgba(255,255,255,0.2);
         }
         
         .input-row {
@@ -146,7 +152,7 @@
         }
         
         .send-btn {
-            background: #e94560;
+            background: rgba(0,0,0,0.4);
             border: none;
             color: #fff;
             width: 50px;
@@ -167,9 +173,9 @@
         
         .action-btn {
             flex: 1;
-            background: rgba(233, 69, 96, 0.2);
-            border: 1px solid #e94560;
-            color: #e94560;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            color: #fff;
             padding: 12px;
             border-radius: 12px;
             font-size: 13px;
@@ -269,17 +275,18 @@
         }
         
         .status-card {
-            background: rgba(255,255,255,0.05);
+            background: rgba(255,255,255,0.2);
             border-radius: 15px;
             padding: 20px;
             margin-bottom: 20px;
+            backdrop-filter: blur(10px);
         }
         
         .status-row {
             display: flex;
             justify-content: space-between;
             padding: 10px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(255,255,255,0.15);
         }
         
         .status-row:last-child {
@@ -287,7 +294,7 @@
         }
         
         .status-label {
-            color: rgba(255,255,255,0.6);
+            color: rgba(255,255,255,0.85);
             font-size: 14px;
         }
         
@@ -304,7 +311,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>💰 Casablanca Cash Flow</h1>
+            <img src="https://casablancaexpress.com/wp-content/uploads/2019/12/logo_hdr.png" alt="Casablanca Express" class="header-logo">
+            <h1>Cash Flow Dashboard</h1>
             <p>Ask me anything about your finances</p>
         </div>
         
@@ -318,6 +326,14 @@
                 <span id="low-point" class="status-value yellow">Loading...</span>
             </div>
             <div class="status-row">
+                <span class="status-label">High Point</span>
+                <span id="high-point" class="status-value green">Loading...</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">30-Day Profit</span>
+                <span id="profit" class="status-value">Loading...</span>
+            </div>
+            <div class="status-row">
                 <span class="status-label">Status</span>
                 <span id="status" class="status-value green">Loading...</span>
             </div>
@@ -326,7 +342,7 @@
         <div class="quick-actions">
             <button class="quick-btn" onclick="askQuestion('How\'s cash flow looking?')">📊 Overview</button>
             <button class="quick-btn" onclick="askQuestion('When is the low point?')">📉 Low Point</button>
-            <button class="quick-btn" onclick="askQuestion('When can I take a distribution?')">💵 Distribution</button>
+            <button class="quick-btn" onclick="openProjectionModal()">📈 Cash Projection</button>
             <button class="quick-btn" onclick="askQuestion('What payments are coming up?')">📅 Payments</button>
         </div>
         
@@ -378,6 +394,47 @@ Examples:
             </div>
         </div>
     </div>
+    
+    <!-- Projection Modal -->
+    <div id="projection-modal" class="modal">
+        <div class="modal-content">
+            <h2>📈 Cash Flow Projection</h2>
+            <p style="color: rgba(255,255,255,0.6); margin-bottom: 20px; font-size: 14px;">
+                How far ahead would you like to project?
+            </p>
+            
+            <div style="margin-bottom: 20px;">
+                <p style="color: #e94560; font-weight: 600; margin-bottom: 10px; font-size: 14px;">📅 Days</p>
+                <div style="display: flex; gap: 10px;">
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('days', 15)">15</button>
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('days', 30)">30</button>
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('days', 45)">45</button>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <p style="color: #e94560; font-weight: 600; margin-bottom: 10px; font-size: 14px;">📆 Weeks</p>
+                <div style="display: flex; gap: 10px;">
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('weeks', 4)">4</button>
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('weeks', 8)">8</button>
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('weeks', 12)">12</button>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <p style="color: #e94560; font-weight: 600; margin-bottom: 10px; font-size: 14px;">🗓️ Months</p>
+                <div style="display: flex; gap: 10px;">
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('months', 6)">6</button>
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('months', 9)">9</button>
+                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('months', 12)">12</button>
+                </div>
+            </div>
+            
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" onclick="closeProjectionModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         const API_BASE = window.location.origin;
@@ -391,6 +448,8 @@ Examples:
                 
                 document.getElementById('current-balance').textContent = data.current_balance.split(' as of')[0];
                 document.getElementById('low-point').textContent = data.low_point;
+                document.getElementById('high-point').textContent = data.high_point || '$369K Feb 12';
+                document.getElementById('profit').textContent = data.monthly_profit || '$85.5K/mo';
                 document.getElementById('status').textContent = data.january_outlook.includes('Tight') ? 'Tight but OK' : 'Healthy';
             } catch (e) {
                 console.error('Failed to load status:', e);
@@ -481,6 +540,20 @@ Examples:
         
         function closeUpdateModal() {
             document.getElementById('update-modal').classList.remove('active');
+        }
+        
+        function openProjectionModal() {
+            document.getElementById('projection-modal').classList.add('active');
+        }
+        
+        function closeProjectionModal() {
+            document.getElementById('projection-modal').classList.remove('active');
+        }
+        
+        async function getProjection(unit, count) {
+            closeProjectionModal();
+            const question = `Show me ${count} ${unit} cash projection`;
+            askQuestion(question);
         }
         
         async function requestUpdate() {
