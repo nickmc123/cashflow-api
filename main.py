@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 import httpx
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = FastAPI(title="Casablanca Cash Flow API")
 
@@ -74,11 +74,30 @@ FORECAST = {
 class DataSubmission(BaseModel):
     data: str
 
+def get_today_balance():
+    """Get balance for today from forecast or nearest date"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    if today in FORECAST:
+        return FORECAST[today]["balance"]
+    # Find nearest date
+    sorted_dates = sorted(FORECAST.keys())
+    for d in sorted_dates:
+        if d >= today:
+            return FORECAST[d]["balance"]
+    return FORECAST[sorted_dates[-1]]["balance"]
+
 # Projection generators - return structured data
 def generate_daily_projection(days: int) -> dict:
-    from datetime import datetime, timedelta
-    start_date = datetime(2026, 1, 13)
-    start_balance = 245000
+    # Start from TODAY
+    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_str = start_date.strftime("%Y-%m-%d")
+    
+    # Get starting balance from forecast or estimate
+    if today_str in FORECAST:
+        start_balance = FORECAST[today_str]["balance"]
+    else:
+        start_balance = get_today_balance()
+    
     daily_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) / 30
     
     rows = []
@@ -119,14 +138,21 @@ def generate_daily_projection(days: int) -> dict:
     }
 
 def generate_weekly_projection(weeks: int) -> dict:
-    from datetime import datetime, timedelta
-    start_date = datetime(2026, 1, 13)
+    # Start from TODAY
+    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_str = start_date.strftime("%Y-%m-%d")
+    
+    if today_str in FORECAST:
+        start_balance = FORECAST[today_str]["balance"]
+    else:
+        start_balance = get_today_balance()
+    
     weekly_net = ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out'] - (MONTHLY_PAYROLL / 4)
     
     rows = []
     low_bal, low_wk = float('inf'), None
     high_bal, high_wk = 0, None
-    balance = 245000
+    balance = start_balance
     
     for i in range(weeks):
         end_date = start_date + timedelta(weeks=i+1)
@@ -137,7 +163,7 @@ def generate_weekly_projection(weeks: int) -> dict:
             balance = FORECAST[date_str]["balance"]
             note = FORECAST[date_str].get("note", "")
         else:
-            balance = 245000 + int(weekly_net * (i + 1) / 4)
+            balance = start_balance + int(weekly_net * (i + 1) / 4)
             balance = max(150000, min(400000, balance))
         
         if balance < low_bal:
@@ -161,6 +187,11 @@ def generate_weekly_projection(weeks: int) -> dict:
     }
 
 def generate_monthly_projection(months: int) -> dict:
+    # Get current month to start from
+    now = datetime.now()
+    current_month = now.month
+    current_year = now.year
+    
     monthly_data = [
         ("Jan 2026", 230000, "After $130K AmEx"),
         ("Feb 2026", 341000, "Strong recovery"),
@@ -176,12 +207,18 @@ def generate_monthly_projection(months: int) -> dict:
         ("Dec 2026", 300000, "Holiday"),
     ]
     
+    # Find starting index based on current month
+    start_idx = current_month - 1  # Jan=0, Feb=1, etc.
+    
     rows = []
     low_bal, low_month = float('inf'), None
     high_bal, high_month = 0, None
     
-    for i in range(min(months, 12)):
-        month, balance, note = monthly_data[i]
+    for i in range(min(months, 12 - start_idx)):
+        idx = start_idx + i
+        if idx >= len(monthly_data):
+            break
+        month, balance, note = monthly_data[idx]
         
         if balance < low_bal:
             low_bal, low_month = balance, month
@@ -230,7 +267,7 @@ def interpret_question(q: str) -> dict:
 💵 **Cash In:** ${ROLLING_30_DAY['cash_in']:,}/month
 💸 **Cash Out:** ${ROLLING_30_DAY['cash_out']:,}/month (ops only, excludes payroll)
 
-📈 **Gross Profit: ${ROLLING_30_DAY['gross_profit']:,}/month**
+📊 **Gross Profit: ${ROLLING_30_DAY['gross_profit']:,}/month**
 
 👥 **After Payroll (~$206K/month):**
 Net: ${NET_MONTHLY_PROFIT:,}/month"""}
@@ -253,7 +290,9 @@ Net: ${NET_MONTHLY_PROFIT:,}/month"""}
 👥 **Payroll:** ~$206K/month (tracked separately)"""}
     
     if any(w in q_lower for w in ['current', 'balance now', 'how much', 'what is the balance', "what's the balance"]):
-        return {"type": "text", "answer": "Current balance is **$245,000** as of January 13, 2026."}
+        today = datetime.now().strftime("%B %d, %Y")
+        balance = get_today_balance()
+        return {"type": "text", "answer": f"Current balance is **${balance:,}** as of {today}."}
     
     if any(w in q_lower for w in ['low', 'lowest', 'minimum', 'tight', 'worried', 'concern']):
         return {"type": "text", "answer": "The **low point is $184,000 on January 20** (MLK holiday weekend impact). It's tight but manageable."}
@@ -323,8 +362,10 @@ async def icon_512():
 @app.get("/summary")
 async def get_summary(code: str = Query(...)):
     verify_code(code)
+    today = datetime.now().strftime("%Y-%m-%d")
+    balance = get_today_balance()
     return {
-        "current_balance": "$245,000 as of 2026-01-13",
+        "current_balance": f"${balance:,} as of {today}",
         "low_point": "$184K Jan 20",
         "high_point": "$369K Feb 12",
         "monthly_profit": f"${ROLLING_30_DAY['gross_profit']//1000}K/mo",
