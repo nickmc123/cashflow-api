@@ -1388,7 +1388,7 @@ Examples:
                 let html = '';
                 for (const tx of data.transactions) {
                     const date = new Date(tx.date + 'T12:00:00');
-                    const dateStr = date.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: '2-digit'});
+                    const dateStr = `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()}`;
                     const isDebit = tx.debit > 0;
                     const amount = isDebit ? tx.debit : tx.credit;
                     const amountStr = '$' + amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
