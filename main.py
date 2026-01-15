@@ -6,7 +6,10 @@ from pydantic import BaseModel
 from typing import Optional
 import httpx
 import os
+import re
 from datetime import datetime, timedelta
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = FastAPI(title="Casablanca Cash Flow API")
 
@@ -23,11 +26,62 @@ ACCESS_CODE = "cflownk"
 # Webhook URL for triggering updates
 WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=739e742528fc953b33f7fddb05705e9f"
 
+# Database connection
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_db():
+    """Get database connection"""
+    if not DATABASE_URL:
+        return None
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
+
+def init_db():
+    """Initialize database tables"""
+    conn = get_db()
+    if not conn:
+        return
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS forecast (
+            date DATE PRIMARY KEY,
+            balance DECIMAL(12,2) NOT NULL,
+            note TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bank_transactions (
+            id SERIAL PRIMARY KEY,
+            date DATE NOT NULL,
+            description TEXT,
+            debit DECIMAL(12,2),
+            credit DECIMAL(12,2),
+            balance DECIMAL(12,2),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# Initialize on startup
+@app.on_event("startup")
+async def startup():
+    init_db()
+
 def verify_code(code: str):
     if code != ACCESS_CODE:
         raise HTTPException(status_code=401, detail="Invalid access code")
 
-# Simple Cash Flow Profit Calculation (Rolling 30-Day Average)
+# Rolling 30-day averages (updated when data is submitted)
 ROLLING_30_DAY = {
     "cash_in": 285000,
     "cash_out": 199500,
@@ -35,12 +89,9 @@ ROLLING_30_DAY = {
 }
 
 MONTHLY_PAYROLL = 206000
-NET_MONTHLY_PROFIT = ROLLING_30_DAY["gross_profit"] - MONTHLY_PAYROLL
 
-# Forecast data
-FORECAST = {
-    "2026-01-13": {"balance": 245000, "note": "Starting balance confirmed"},
-    "2026-01-14": {"balance": 241000, "note": "Normal ops"},
+# Fallback forecast if database is empty
+DEFAULT_FORECAST = {
     "2026-01-15": {"balance": 237000, "note": "Normal ops"},
     "2026-01-16": {"balance": 225000, "note": "AmEx $106K payment"},
     "2026-01-17": {"balance": 221000, "note": "Normal ops"},
@@ -71,30 +122,154 @@ FORECAST = {
     "2026-02-24": {"balance": 341000, "note": "End of forecast period"}
 }
 
-class DataSubmission(BaseModel):
-    data: str
+def get_forecast_from_db():
+    """Get forecast data from database"""
+    conn = get_db()
+    if not conn:
+        return DEFAULT_FORECAST
+    
+    cur = conn.cursor(RealDictCursor)
+    cur.execute("SELECT date, balance, note FROM forecast ORDER BY date")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    if not rows:
+        return DEFAULT_FORECAST
+    
+    forecast = {}
+    for row in rows:
+        date_str = row['date'].strftime("%Y-%m-%d")
+        forecast[date_str] = {
+            "balance": float(row['balance']),
+            "note": row['note'] or ""
+        }
+    return forecast
 
 def get_today_balance():
     """Get balance for today from forecast or nearest date"""
+    forecast = get_forecast_from_db()
     today = datetime.now().strftime("%Y-%m-%d")
-    if today in FORECAST:
-        return FORECAST[today]["balance"]
-    # Find nearest date
-    sorted_dates = sorted(FORECAST.keys())
+    if today in forecast:
+        return forecast[today]["balance"]
+    sorted_dates = sorted(forecast.keys())
     for d in sorted_dates:
         if d >= today:
-            return FORECAST[d]["balance"]
-    return FORECAST[sorted_dates[-1]]["balance"]
+            return forecast[d]["balance"]
+    return forecast[sorted_dates[-1]]["balance"] if sorted_dates else 237000
 
-# Projection generators - return structured data
+class DataSubmission(BaseModel):
+    data: str
+
+def parse_bank_data(raw_data: str) -> list:
+    """Parse bank transaction data from various formats"""
+    lines = raw_data.strip().split('\n')
+    transactions = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Try tab-separated format: Date\tDescription\tDebit\tCredit\tBalance
+        parts = line.split('\t')
+        if len(parts) >= 5:
+            try:
+                date_str = parts[0].strip()
+                desc = parts[1].strip()
+                debit = parts[2].strip().replace(',', '').replace('$', '')
+                credit = parts[3].strip().replace(',', '').replace('$', '')
+                balance = parts[4].strip().replace(',', '').replace('$', '')
+                
+                # Parse date
+                date = None
+                for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y', '%m-%d-%Y']:
+                    try:
+                        date = datetime.strptime(date_str, fmt)
+                        break
+                    except:
+                        continue
+                
+                if date:
+                    transactions.append({
+                        'date': date,
+                        'description': desc,
+                        'debit': float(debit) if debit else 0,
+                        'credit': float(credit) if credit else 0,
+                        'balance': float(balance) if balance else 0
+                    })
+            except Exception as e:
+                continue
+    
+    return transactions
+
+@app.post("/submit-data")
+async def submit_data(submission: DataSubmission, code: str = Query(...)):
+    verify_code(code)
+    
+    # Parse the data
+    transactions = parse_bank_data(submission.data)
+    
+    if not transactions:
+        # Fallback: send to webhook for manual processing
+        async with httpx.AsyncClient() as client:
+            await client.post(WEBHOOK_URL, json={
+                "type": "data_submission",
+                "data": submission.data[:5000],
+                "timestamp": datetime.now().isoformat()
+            })
+        return {"status": "queued", "message": "Data sent for processing"}
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor()
+    
+    # Insert transactions and update forecast with actual balances
+    for tx in transactions:
+        # Insert transaction
+        cur.execute("""
+            INSERT INTO bank_transactions (date, description, debit, credit, balance)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, (tx['date'].date(), tx['description'], tx['debit'], tx['credit'], tx['balance']))
+        
+        # Update forecast with actual balance
+        note = "Actual" if tx['balance'] else ""
+        if tx['debit'] > 50000:
+            note = f"Large debit: ${tx['debit']:,.0f}"
+        elif tx['credit'] > 50000:
+            note = f"Large credit: ${tx['credit']:,.0f}"
+        
+        cur.execute("""
+            INSERT INTO forecast (date, balance, note)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (date) DO UPDATE SET
+                balance = EXCLUDED.balance,
+                note = CASE WHEN EXCLUDED.note != '' THEN EXCLUDED.note ELSE forecast.note END,
+                updated_at = CURRENT_TIMESTAMP
+        """, (tx['date'].date(), tx['balance'], note))
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "message": f"Processed {len(transactions)} transactions",
+        "transactions": len(transactions),
+        "latest_balance": transactions[-1]['balance'] if transactions else None
+    }
+
+# Projection generators
 def generate_daily_projection(days: int) -> dict:
-    # Start from TODAY
+    forecast = get_forecast_from_db()
     start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
     
-    # Get starting balance from forecast or estimate
-    if today_str in FORECAST:
-        start_balance = FORECAST[today_str]["balance"]
+    if today_str in forecast:
+        start_balance = forecast[today_str]["balance"]
     else:
         start_balance = get_today_balance()
     
@@ -110,9 +285,9 @@ def generate_daily_projection(days: int) -> dict:
         date_str = date.strftime("%Y-%m-%d")
         
         note = ""
-        if date_str in FORECAST:
-            balance = FORECAST[date_str]["balance"]
-            note = FORECAST[date_str].get("note", "")
+        if date_str in forecast:
+            balance = forecast[date_str]["balance"]
+            note = forecast[date_str].get("note", "")
         else:
             if date.weekday() < 5:
                 balance = int(balance + daily_net)
@@ -138,41 +313,45 @@ def generate_daily_projection(days: int) -> dict:
     }
 
 def generate_weekly_projection(weeks: int) -> dict:
-    # Start from TODAY
+    forecast = get_forecast_from_db()
     start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
     
-    if today_str in FORECAST:
-        start_balance = FORECAST[today_str]["balance"]
+    if today_str in forecast:
+        start_balance = forecast[today_str]["balance"]
     else:
         start_balance = get_today_balance()
     
     weekly_net = ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out'] - (MONTHLY_PAYROLL / 4)
     
     rows = []
-    low_bal, low_wk = float('inf'), None
-    high_bal, high_wk = 0, None
     balance = start_balance
+    low_bal, low_date = float('inf'), None
+    high_bal, high_date = 0, None
     
     for i in range(weeks):
-        end_date = start_date + timedelta(weeks=i+1)
-        date_str = end_date.strftime("%Y-%m-%d")
+        week_start = start_date + timedelta(weeks=i)
+        week_end = week_start + timedelta(days=6)
         
         note = ""
-        if date_str in FORECAST:
-            balance = FORECAST[date_str]["balance"]
-            note = FORECAST[date_str].get("note", "")
-        else:
-            balance = start_balance + int(weekly_net * (i + 1) / 4)
-            balance = max(150000, min(400000, balance))
+        week_balance = balance
+        for j in range(7):
+            d = week_start + timedelta(days=j)
+            d_str = d.strftime("%Y-%m-%d")
+            if d_str in forecast:
+                week_balance = forecast[d_str]["balance"]
+                if forecast[d_str].get("note"):
+                    note = forecast[d_str]["note"]
+        
+        balance = week_balance if week_balance != balance else int(balance + weekly_net)
         
         if balance < low_bal:
-            low_bal, low_wk = balance, f"Week {i+1}"
+            low_bal, low_date = balance, week_start.strftime("%b %d")
         if balance > high_bal:
-            high_bal, high_wk = balance, f"Week {i+1}"
+            high_bal, high_date = balance, week_start.strftime("%b %d")
         
         rows.append({
-            "date": f"Week {i+1} ({end_date.strftime('%b %d')})",
+            "date": f"Week of {week_start.strftime('%b %d')}",
             "balance": balance,
             "note": note
         })
@@ -182,51 +361,39 @@ def generate_weekly_projection(weeks: int) -> dict:
         "title": f"{weeks}-Week Projection",
         "period": "weekly",
         "rows": rows,
-        "low": {"value": low_bal, "label": low_wk, "note": ""},
-        "high": {"value": high_bal, "label": high_wk, "note": ""}
+        "low": {"value": low_bal, "label": low_date, "note": ""},
+        "high": {"value": high_bal, "label": high_date, "note": ""}
     }
 
 def generate_monthly_projection(months: int) -> dict:
-    # Get current month to start from
-    now = datetime.now()
-    current_month = now.month
-    current_year = now.year
-    
-    monthly_data = [
-        ("Jan 2026", 230000, "After $130K AmEx"),
-        ("Feb 2026", 341000, "Strong recovery"),
-        ("Mar 2026", 320000, "Typical ops"),
-        ("Apr 2026", 310000, "Seasonal adj"),
-        ("May 2026", 330000, "Summer pickup"),
-        ("Jun 2026", 350000, "Peak starts"),
-        ("Jul 2026", 380000, "Peak summer"),
-        ("Aug 2026", 390000, "Peak summer"),
-        ("Sep 2026", 360000, "Post-summer"),
-        ("Oct 2026", 340000, "Fall ops"),
-        ("Nov 2026", 320000, "Pre-holiday"),
-        ("Dec 2026", 300000, "Holiday"),
-    ]
-    
-    # Find starting index based on current month
-    start_idx = current_month - 1  # Jan=0, Feb=1, etc.
+    start_balance = get_today_balance()
+    monthly_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) * 30 / 30 - MONTHLY_PAYROLL
     
     rows = []
-    low_bal, low_month = float('inf'), None
-    high_bal, high_month = 0, None
+    balance = start_balance
+    low_bal, low_date = float('inf'), None
+    high_bal, high_date = 0, None
     
-    for i in range(min(months, 12 - start_idx)):
-        idx = start_idx + i
-        if idx >= len(monthly_data):
-            break
-        month, balance, note = monthly_data[idx]
+    current = datetime.now().replace(day=1)
+    
+    for i in range(months):
+        month_date = current + timedelta(days=32*i)
+        month_date = month_date.replace(day=1)
+        
+        note = ""
+        if i == 0:
+            note = "Current month"
+        
+        if i > 0:
+            balance = int(balance + monthly_net)
         
         if balance < low_bal:
-            low_bal, low_month = balance, month
+            low_bal, low_date = balance, month_date.strftime("%b %Y")
         if balance > high_bal:
-            high_bal, high_month = balance, month
+            high_bal, high_date = balance, month_date.strftime("%b %Y")
         
         rows.append({
-            "date": month,
+            "date": month_date.strftime("%B %Y"),
             "balance": balance,
             "note": note
         })
@@ -236,191 +403,152 @@ def generate_monthly_projection(months: int) -> dict:
         "title": f"{months}-Month Projection",
         "period": "monthly",
         "rows": rows,
-        "low": {"value": low_bal, "label": low_month, "note": ""},
-        "high": {"value": high_bal, "label": high_month, "note": ""}
+        "low": {"value": low_bal, "label": low_date, "note": ""},
+        "high": {"value": high_bal, "label": high_date, "note": ""}
     }
-
-def interpret_question(q: str) -> dict:
-    q_lower = q.lower()
-    
-    # Projection questions - return structured data
-    if 'projection' in q_lower or ('show' in q_lower and any(w in q_lower for w in ['days', 'weeks', 'months'])):
-        import re
-        match = re.search(r'(\d+)\s*(days?|weeks?|months?)', q_lower)
-        if match:
-            count = int(match.group(1))
-            unit = match.group(2).rstrip('s')
-            
-            if unit == 'day':
-                return generate_daily_projection(count)
-            elif unit == 'week':
-                return generate_weekly_projection(count)
-            elif unit == 'month':
-                return generate_monthly_projection(count)
-        
-        return {"type": "text", "answer": "Please specify a time period like '30 days', '8 weeks', or '6 months'."}
-    
-    # Text-based answers for other questions
-    if any(w in q_lower for w in ['profit', 'margin', 'making', 'earn', 'net', 'gross']):
-        return {"type": "text", "answer": f"""**Monthly Average Profit** (Rolling 30-Day Cash Flow Method)
-
-💵 **Cash In:** ${ROLLING_30_DAY['cash_in']:,}/month
-💸 **Cash Out:** ${ROLLING_30_DAY['cash_out']:,}/month (ops only, excludes payroll)
-
-📊 **Gross Profit: ${ROLLING_30_DAY['gross_profit']:,}/month**
-
-👥 **After Payroll (~$206K/month):**
-Net: ${NET_MONTHLY_PROFIT:,}/month"""}
-    
-    if any(w in q_lower for w in ['revenue', 'income', 'sales', 'bringing in', 'cash in']):
-        return {"type": "text", "answer": f"""**Monthly Cash In: ${ROLLING_30_DAY['cash_in']:,}** (30-day rolling avg)
-
-📥 Sources:
-• CC Processors (Paymentech, CMS, AmEx)
-• Wire income (~$14K/week)
-• E-deposits (checks)"""}
-    
-    if any(w in q_lower for w in ['expense', 'cost', 'spending', 'burn', 'overhead', 'cash out']):
-        return {"type": "text", "answer": f"""**Monthly Cash Out:** (30-day rolling avg)
-
-🏢 **Ops:** ${ROLLING_30_DAY['cash_out']:,}/month
-• Daily ops: $15-18K/day
-• Includes refund checks
-
-👥 **Payroll:** ~$206K/month (tracked separately)"""}
-    
-    if any(w in q_lower for w in ['current', 'balance now', 'how much', 'what is the balance', "what's the balance"]):
-        today = datetime.now().strftime("%B %d, %Y")
-        balance = get_today_balance()
-        return {"type": "text", "answer": f"Current balance is **${balance:,}** as of {today}."}
-    
-    if any(w in q_lower for w in ['low', 'lowest', 'minimum', 'tight', 'worried', 'concern']):
-        return {"type": "text", "answer": "The **low point is $184,000 on January 20** (MLK holiday weekend impact). It's tight but manageable."}
-    
-    if any(w in q_lower for w in ['peak', 'high', 'maximum', 'best']):
-        return {"type": "text", "answer": "The **peak is $369,000 on February 12** - right before the mid-February AmEx payment."}
-    
-    if any(w in q_lower for w in ['distribution', 'take money', 'withdraw', 'pull out', '$50k', '50k']):
-        return {"type": "text", "answer": "Best time for the **$50K distribution is around February 12** when we hit $369K. Take it before the AmEx payment on Feb 13."}
-    
-    if any(w in q_lower for w in ['amex', 'american express', 'payment', 'due', 'owe']):
-        return {"type": "text", "answer": "**AmEx Payment Schedule:**\n• $106K due Jan 16 \n• $130K due Jan 31\n• $100K due mid-February"}
-    
-    if any(w in q_lower for w in ['payroll', 'salary', 'wages', 'employee']):
-        return {"type": "text", "answer": "**Payroll runs twice monthly:**\n• Feb 3: ~$75K over 3 days + $25K taxes\n• Feb 18: Same structure"}
-    
-    if 'january' in q_lower or 'jan' in q_lower:
-        return {"type": "text", "answer": "**January outlook:** Tight but manageable. Low point of $184K on Jan 20, then recovery. Ends around $230K."}
-    
-    if 'february' in q_lower or 'feb' in q_lower:
-        return {"type": "text", "answer": "**February outlook:** Strong recovery! Peaks at $369K on Feb 12. After AmEx and payroll, ends around $341K."}
-    
-    if any(w in q_lower for w in ['overview', 'summary', 'how', 'looking', 'status', 'ok', 'safe', 'good']):
-        return {"type": "text", "answer": "**Cash flow is tight but manageable.**\n\n📉 Low point: $184K on Jan 20\n📈 Peak: $369K on Feb 12\n💰 Distribution timing: Best around Feb 12"}
-    
-    # Specific date check
-    import re
-    date_match = re.search(r'(jan|feb)\w*\s*(\d{1,2})', q_lower)
-    if date_match:
-        month = '01' if 'jan' in date_match.group(1) else '02'
-        day = date_match.group(2).zfill(2)
-        date_key = f"2026-{month}-{day}"
-        if date_key in FORECAST:
-            f = FORECAST[date_key]
-            return {"type": "text", "answer": f"**{date_key}:** Balance projected at **${f['balance']:,}**\n{f['note']}"}
-        return {"type": "text", "answer": f"I don't have a specific projection for {date_key}."}
-    
-    # Unknown question
-    try:
-        webhook_url = "https://webhooks.tasklet.ai/v1/public/webhook?token=739e742528fc953b33f7fddb05705e9f"
-        httpx.post(webhook_url, json={"type": "unknown_question", "question": q}, timeout=5.0)
-    except:
-        pass
-    
-    return {"type": "text", "answer": """🤔 That's not something I'm ready to answer yet! I've sent your question to get this enhanced.\n\n**I can help with:**\n• Current balance & projections\n• Low points & peaks\n• Distribution timing\n• AmEx payments & Payroll"""}
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    try:
-        with open("static/index.html", "r") as f:
-            return HTMLResponse(content=f.read())
-    except:
-        return HTMLResponse(content="<h1>Casablanca Cash Flow API</h1>")
-
-@app.get("/manifest.json")
-async def manifest():
-    return FileResponse("static/manifest.json", media_type="application/json")
-
-@app.get("/icon-192.png")
-async def icon_192():
-    return FileResponse("static/icon-192.png", media_type="image/png")
-
-@app.get("/icon-512.png")
-async def icon_512():
-    return FileResponse("static/icon-512.png", media_type="image/png")
 
 @app.get("/summary")
 async def get_summary(code: str = Query(...)):
     verify_code(code)
+    forecast = get_forecast_from_db()
+    sorted_dates = sorted(forecast.keys())
+    
     today = datetime.now().strftime("%Y-%m-%d")
-    balance = get_today_balance()
+    current_balance = get_today_balance()
+    
+    low_point = min(forecast.values(), key=lambda x: x["balance"])
+    low_date = [k for k, v in forecast.items() if v["balance"] == low_point["balance"]][0]
+    
+    high_point = max(forecast.values(), key=lambda x: x["balance"])
+    high_date = [k for k, v in forecast.items() if v["balance"] == high_point["balance"]][0]
+    
+    gross_profit = ROLLING_30_DAY['gross_profit']
+    net_profit = gross_profit - MONTHLY_PAYROLL
+    
     return {
-        "current_balance": f"${balance:,} as of {today}",
-        "low_point": "$184K Jan 20",
-        "high_point": "$369K Feb 12",
-        "monthly_profit": f"${ROLLING_30_DAY['gross_profit']//1000}K/mo",
-        "january_outlook": "Tight but manageable - lowest at $184K on Jan 20",
-        "february_outlook": "Strong recovery to $369K by Feb 12",
-        "distribution_timing": "Best to take $50K distribution around Feb 12"
+        "current_balance": current_balance,
+        "as_of": today,
+        "low_point": {
+            "balance": low_point["balance"],
+            "date": low_date,
+            "note": low_point.get("note", "")
+        },
+        "high_point": {
+            "balance": high_point["balance"],
+            "date": high_date,
+            "note": high_point.get("note", "")
+        },
+        "profit_30day": gross_profit
     }
 
 @app.get("/forecast")
 async def get_forecast(code: str = Query(...)):
     verify_code(code)
-    return {"forecast": FORECAST}
-
-@app.get("/balance/{date}")
-async def get_balance(date: str, code: str = Query(...)):
-    verify_code(code)
-    if date in FORECAST:
-        return FORECAST[date]
-    raise HTTPException(status_code=404, detail=f"No forecast for {date}")
+    forecast = get_forecast_from_db()
+    return forecast
 
 @app.get("/low-point")
 async def get_low_point(code: str = Query(...)):
     verify_code(code)
-    return {"date": "2026-01-20", "balance": 184000, "note": "MLK holiday weekend impact"}
+    forecast = get_forecast_from_db()
+    
+    low_point = min(forecast.values(), key=lambda x: x["balance"])
+    low_date = [k for k, v in forecast.items() if v["balance"] == low_point["balance"]][0]
+    
+    return {
+        "date": low_date,
+        "balance": low_point["balance"],
+        "note": low_point.get("note", "")
+    }
 
-@app.get("/ask")
+@app.get("/balance/{date}")
+async def get_balance(date: str, code: str = Query(...)):
+    verify_code(code)
+    forecast = get_forecast_from_db()
+    
+    if date in forecast:
+        return {"date": date, "balance": forecast[date]["balance"], "note": forecast[date].get("note", "")}
+    raise HTTPException(status_code=404, detail=f"No forecast for {date}")
+
+@app.post("/ask")
 async def ask_question(code: str = Query(...), question: str = Query(...)):
     verify_code(code)
-    result = interpret_question(question)
-    # Return structured data for projections, text answer for others
-    if result.get("type") == "projection":
-        return {"question": question, "projection": result}
-    else:
-        return {"question": question, "answer": result.get("answer", str(result))}
+    q = question.lower()
+    
+    # Projection requests
+    if any(word in q for word in ['project', 'forecast', 'show', 'next']):
+        if 'day' in q:
+            days = 30
+            for num in [15, 30, 45, 60, 90]:
+                if str(num) in q:
+                    days = num
+                    break
+            return generate_daily_projection(days)
+        elif 'week' in q:
+            weeks = 8
+            for num in [4, 8, 12]:
+                if str(num) in q:
+                    weeks = num
+                    break
+            return generate_weekly_projection(weeks)
+        elif 'month' in q:
+            months = 6
+            for num in [6, 9, 12]:
+                if str(num) in q:
+                    months = num
+                    break
+            return generate_monthly_projection(months)
+    
+    # Balance queries
+    if 'balance' in q or 'current' in q:
+        balance = get_today_balance()
+        return {"type": "answer", "text": f"Current balance: ${balance:,.0f}"}
+    
+    # Low point queries
+    if 'low' in q:
+        forecast = get_forecast_from_db()
+        low_point = min(forecast.values(), key=lambda x: x["balance"])
+        low_date = [k for k, v in forecast.items() if v["balance"] == low_point["balance"]][0]
+        return {"type": "answer", "text": f"Low point: ${low_point['balance']:,.0f} on {low_date}"}
+    
+    # High/peak queries
+    if 'high' in q or 'peak' in q:
+        forecast = get_forecast_from_db()
+        high_point = max(forecast.values(), key=lambda x: x["balance"])
+        high_date = [k for k, v in forecast.items() if v["balance"] == high_point["balance"]][0]
+        return {"type": "answer", "text": f"High point: ${high_point['balance']:,.0f} on {high_date}"}
+    
+    # Profit queries
+    if 'profit' in q:
+        return {"type": "answer", "text": f"30-day average profit: ${ROLLING_30_DAY['gross_profit']:,.0f}"}
+    
+    # Unknown - send to webhook
+    async with httpx.AsyncClient() as client:
+        await client.post(WEBHOOK_URL, json={
+            "type": "unknown_question",
+            "question": question,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    return {"type": "answer", "text": "I'll look into that and get back to you!"}
 
-@app.post("/submit-data")
-async def submit_data(code: str = Query(...), submission: DataSubmission = None):
-    verify_code(code)
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post(WEBHOOK_URL, json={"action": "process_data", "data": submission.data if submission else ""}, timeout=10)
-    except:
-        pass
-    return {"message": "Data received! Processing and updating projections."}
-
-@app.post("/request-update")
+@app.get("/request-update")
 async def request_update(code: str = Query(...)):
     verify_code(code)
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post(WEBHOOK_URL, json={"action": "pull_authorizenet"}, timeout=10)
-    except:
-        pass
-    return {"message": "Update requested! Pulling latest settlements."}
+    async with httpx.AsyncClient() as client:
+        await client.post(WEBHOOK_URL, json={
+            "type": "update_request",
+            "timestamp": datetime.now().isoformat()
+        })
+    return {"status": "requested", "message": "Update request sent"}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+@app.get("/")
+async def root():
+    return FileResponse("static/index.html")
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# Mount static files last
+app.mount("/static", StaticFiles(directory="static"), name="static")
