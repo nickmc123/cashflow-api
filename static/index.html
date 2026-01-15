@@ -1077,8 +1077,17 @@ Examples:
             </div>
         </div>
         
-        <!-- Pagination Info -->
-        <div class="pagination-info" id="pagination-info">Showing 0-0 of 0</div>
+        <!-- Pagination Info & Delete Button -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 15px;">
+            <div class="pagination-info" id="pagination-info" style="margin:0;">Showing 0-0 of 0</div>
+            <div style="display:flex;gap:10px;align-items:center;">
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:rgba(255,255,255,0.7);cursor:pointer;">
+                    <input type="checkbox" id="select-all-tx" onchange="toggleSelectAll()" style="width:18px;height:18px;cursor:pointer;">
+                    All
+                </label>
+                <button id="delete-selected-btn" onclick="deleteSelectedTransactions()" style="display:none;padding:8px 15px;background:linear-gradient(135deg,#ff6b6b,#ee5a5a);border:none;border-radius:8px;color:white;font-weight:600;font-size:12px;cursor:pointer;">🗑️ Delete</button>
+            </div>
+        </div>
         
         <!-- Transactions List -->
         <div class="proj-list" id="transactions-list"></div>
@@ -1404,20 +1413,24 @@ Examples:
                     const amount = isDebit ? tx.debit : tx.credit;
                     const amountStr = '$' + amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
                     const balanceStr = '$' + tx.balance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                    const txId = tx.id || `${tx.date}_${tx.description}_${tx.debit}_${tx.credit}`;
                     
                     html += `
-                        <div class="proj-row">
-                            <div class="proj-date" style="min-width:70px;">${dateStr}</div>
+                        <div class="proj-row" style="align-items:center;">
+                            <input type="checkbox" class="tx-checkbox" data-txid="${txId}" data-date="${tx.date}" data-desc="${(tx.description || '').substring(0,30)}" data-debit="${tx.debit}" data-credit="${tx.credit}" onchange="updateDeleteButton()" style="width:18px;height:18px;margin-right:8px;cursor:pointer;flex-shrink:0;">
+                            <div class="proj-date" style="min-width:60px;">${dateStr}</div>
                             <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
                                 <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,0.9);">${tx.description || '-'}</div>
                                 <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">Bal: ${balanceStr}</div>
                             </div>
-                            <div style="text-align:right;min-width:80px;">
+                            <div style="text-align:right;min-width:70px;">
                                 <span style="color:${isDebit ? '#ff6b6b' : '#51cf66'};font-size:15px;font-weight:600;">${isDebit ? '-' : '+'}${amountStr}</span>
                             </div>
                         </div>`;
                 }
                 listEl.innerHTML = html;
+                document.getElementById('select-all-tx').checked = false;
+                updateDeleteButton();
                 updatePaginationUI();
             } catch (e) {
                 listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#ff6b6b;">Failed to load transactions</div>';
@@ -1471,6 +1484,61 @@ Examples:
         
         function closeTransactionsPage() {
             document.getElementById('transactions-page').classList.remove('active');
+        }
+        
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('select-all-tx').checked;
+            document.querySelectorAll('.tx-checkbox').forEach(cb => cb.checked = selectAll);
+            updateDeleteButton();
+        }
+        
+        function updateDeleteButton() {
+            const selected = document.querySelectorAll('.tx-checkbox:checked').length;
+            const btn = document.getElementById('delete-selected-btn');
+            if (selected > 0) {
+                btn.style.display = 'inline-block';
+                btn.textContent = `🗑️ Delete (${selected})`;
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+        
+        async function deleteSelectedTransactions() {
+            const checkboxes = document.querySelectorAll('.tx-checkbox:checked');
+            if (checkboxes.length === 0) return;
+            
+            const count = checkboxes.length;
+            if (!confirm(`Delete ${count} transaction(s)? This cannot be undone.`)) return;
+            
+            // Collect transaction IDs
+            const ids = [];
+            checkboxes.forEach(cb => {
+                const id = parseInt(cb.dataset.txid);
+                if (!isNaN(id)) ids.push(id);
+            });
+            
+            if (ids.length === 0) {
+                alert('No valid transaction IDs found');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/delete-transactions-by-ids?code=${CODE}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ids: ids})
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert(`Deleted ${result.deleted} transaction(s)`);
+                    loadTransactions();
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (e) {
+                alert('Error deleting: ' + e.message);
+            }
         }
         
         async function askQuestion(question) {
