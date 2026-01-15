@@ -302,6 +302,29 @@ def parse_bank_data(raw_data: str) -> list:
         # This is part of the description
         desc_lines.append(line)
     
+    # If still no transactions, try simple format: "Description Amount" or "Description -Amount"
+    if not transactions:
+        simple_pattern = re.compile(r'^(.+?)\s+(-?\$?[\d,]+\.?\d*)$')
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            match = simple_pattern.match(line)
+            if match:
+                desc = match.group(1).strip()
+                amount_str = match.group(2).replace(',', '').replace('$', '')
+                try:
+                    amount = float(amount_str)
+                    transactions.append({
+                        'date': current_date,
+                        'description': desc,
+                        'debit': abs(amount) if amount < 0 else 0,
+                        'credit': amount if amount > 0 else 0,
+                        'balance': 0
+                    })
+                except:
+                    continue
+    
     return transactions
 
 
