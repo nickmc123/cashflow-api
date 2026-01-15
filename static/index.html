@@ -31,6 +31,76 @@
             padding-bottom: 100px;
         }
         
+        /* Login Screen */
+        .login-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .login-box {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px 30px;
+            width: 100%;
+            max-width: 350px;
+            text-align: center;
+        }
+        
+        .login-box h2 {
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: #fff;
+        }
+        
+        .login-input {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.2);
+            color: #fff;
+            font-size: 16px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .login-input::placeholder {
+            color: rgba(255,255,255,0.6);
+        }
+        
+        .login-btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        .login-btn:active {
+            background: rgba(0,0,0,0.5);
+        }
+        
+        .login-error {
+            color: #ffcccc;
+            font-size: 14px;
+            margin-top: 15px;
+            display: none;
+        }
+        
+        .app-content {
+            display: none;
+        }
+        
         .header {
             text-align: center;
             padding: 20px 0;
@@ -886,6 +956,20 @@
     </style>
 </head>
 <body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen">
+        <img src="https://casablancaexpress.com/wp-content/uploads/2019/12/logo_hdr.png" alt="Casablanca Express" style="max-width: 200px; margin-bottom: 30px;">
+        <div class="login-box">
+            <h2>Sign In</h2>
+            <input type="text" id="login-user" class="login-input" placeholder="Username" autocapitalize="none" autocomplete="username">
+            <input type="password" id="login-pass" class="login-input" placeholder="Password" autocomplete="current-password">
+            <button class="login-btn" onclick="attemptLogin()">Sign In</button>
+            <div id="login-error" class="login-error">Invalid credentials</div>
+        </div>
+    </div>
+    
+    <!-- Main App Content -->
+    <div id="app-content" class="app-content">
     <div class="container">
         <div class="header">
             <img src="https://casablancaexpress.com/wp-content/uploads/2019/12/logo_hdr.png" alt="Casablanca Express" class="header-logo">
@@ -1734,8 +1818,48 @@ Examples:
             chat.scrollTop = chat.scrollHeight;
         }
         
-        // Initialize
-        loadStatus();
+        // Login Functions
+        function attemptLogin() {
+            const user = document.getElementById('login-user').value.toLowerCase();
+            const pass = document.getElementById('login-pass').value;
+            
+            if (user === 'casa' && pass === '6300') {
+                localStorage.setItem('cashflow_auth', 'true');
+                showApp();
+            } else {
+                document.getElementById('login-error').style.display = 'block';
+                document.getElementById('login-pass').value = '';
+            }
+        }
+        
+        function showApp() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-content').style.display = 'block';
+            loadStatus();
+        }
+        
+        function logout() {
+            localStorage.removeItem('cashflow_auth');
+            location.reload();
+        }
+        
+        function checkAuth() {
+            if (localStorage.getItem('cashflow_auth') === 'true') {
+                showApp();
+            }
+        }
+        
+        // Handle Enter key on login
+        document.getElementById('login-pass').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') attemptLogin();
+        });
+        document.getElementById('login-user').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') document.getElementById('login-pass').focus();
+        });
+        
+        // Initialize - check auth first
+        checkAuth();
     </script>
+    </div><!-- end app-content -->
 </body>
 </html>
