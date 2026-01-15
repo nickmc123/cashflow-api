@@ -722,17 +722,39 @@ Examples:
         const API_BASE = window.location.origin;
         const CODE = 'cflownk';
         
+        // Format currency
+        function formatCurrency(amount) {
+            if (amount >= 1000000) return '$' + (amount/1000000).toFixed(1) + 'M';
+            if (amount >= 1000) return '$' + (amount/1000).toFixed(0) + 'K';
+            return '$' + amount;
+        }
+        
         // Load initial status
         async function loadStatus() {
             try {
                 const response = await fetch(`${API_BASE}/summary?code=${CODE}`);
                 const data = await response.json();
                 
-                document.getElementById('current-balance').textContent = data.current_balance.split(' as of')[0];
-                document.getElementById('low-point').textContent = data.low_point;
-                document.getElementById('high-point').textContent = data.high_point || '$369K Feb 12';
-                document.getElementById('profit').textContent = data.monthly_profit || '$85.5K/mo';
-                document.getElementById('status').textContent = data.january_outlook.includes('Tight') ? 'Tight but OK' : 'Healthy';
+                // Handle new structured JSON format
+                document.getElementById('current-balance').textContent = formatCurrency(data.current_balance);
+                
+                if (data.low_point && typeof data.low_point === 'object') {
+                    document.getElementById('low-point').textContent = formatCurrency(data.low_point.balance) + ' ' + data.low_point.date;
+                } else {
+                    document.getElementById('low-point').textContent = data.low_point || 'N/A';
+                }
+                
+                if (data.high_point && typeof data.high_point === 'object') {
+                    document.getElementById('high-point').textContent = formatCurrency(data.high_point.balance) + ' ' + data.high_point.date;
+                } else {
+                    document.getElementById('high-point').textContent = data.high_point || 'N/A';
+                }
+                
+                document.getElementById('profit').textContent = formatCurrency(data.profit_30day) + '/mo';
+                
+                // Status based on current balance
+                const status = data.current_balance < 200000 ? 'Tight' : (data.current_balance < 250000 ? 'OK' : 'Healthy');
+                document.getElementById('status').textContent = status;
             } catch (e) {
                 console.error('Failed to load status:', e);
             }
