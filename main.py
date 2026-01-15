@@ -522,6 +522,15 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
     if 'profit' in q:
         return {"type": "answer", "text": f"30-day average profit: ${ROLLING_30_DAY['gross_profit']:,.0f}"}
     
+    # Refresh/update requests
+    if 'refresh' in q or 'update' in q:
+        async with httpx.AsyncClient() as client:
+            await client.post(WEBHOOK_URL, json={
+                "type": "refresh_request",
+                "timestamp": datetime.now().isoformat()
+            })
+        return {"type": "answer", "text": "Refreshing data from Authorize.Net... Check back in a minute!"}
+    
     # Unknown - send to webhook
     async with httpx.AsyncClient() as client:
         await client.post(WEBHOOK_URL, json={
