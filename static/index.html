@@ -629,7 +629,7 @@
         
         <div class="action-buttons">
             <button class="action-btn" onclick="openPasteModal()">📋 Paste Data</button>
-            <button class="action-btn" onclick="requestUpdate()">🔄 Update from Auth.net</button>
+            <button class="action-btn" onclick="showTransactions()">📄 Recent Transactions</button>
         </div>
         
         <div id="chat" class="chat-container"></div>
@@ -716,6 +716,15 @@ Examples:
         </div>
         <div class="proj-summary" id="proj-summary"></div>
         <div class="proj-list" id="proj-list"></div>
+    </div>
+
+    <!-- Full-Screen Transactions Page -->
+    <div id="transactions-page" class="projection-page">
+        <div class="proj-header">
+            <button class="back-btn" onclick="closeTransactionsPage()">← Back</button>
+            <h1>Recent Transactions</h1>
+        </div>
+        <div class="proj-list" id="transactions-list"></div>
     </div>
 
     <script>
@@ -816,6 +825,49 @@ Examples:
         
         function closeProjectionPage() {
             document.getElementById('projection-page').classList.remove('active');
+        }
+        
+        async function showTransactions() {
+            const listEl = document.getElementById('transactions-list');
+            listEl.innerHTML = '<div style="text-align:center;padding:40px;"><div class="loading"></div></div>';
+            document.getElementById('transactions-page').classList.add('active');
+            
+            try {
+                const response = await fetch(`${API_BASE}/transactions?code=${CODE}&limit=30`);
+                const data = await response.json();
+                
+                if (!data.transactions || data.transactions.length === 0) {
+                    listEl.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.6);">No transactions found. Paste bank data to add transactions.</div>';
+                    return;
+                }
+                
+                let html = '';
+                for (const tx of data.transactions) {
+                    const date = new Date(tx.date);
+                    const dateStr = date.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'});
+                    const isDebit = tx.debit > 0;
+                    const amount = isDebit ? tx.debit : tx.credit;
+                    const amountStr = '$' + amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                    const balanceStr = '$' + tx.balance.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                    
+                    html += `
+                        <div class="proj-row">
+                            <div class="proj-date">${dateStr}</div>
+                            <div class="proj-balance" style="display:flex;flex-direction:column;align-items:flex-end;">
+                                <span style="color:${isDebit ? '#ff6b6b' : '#51cf66'};font-size:14px;">${isDebit ? '-' : '+'}${amountStr}</span>
+                                <span style="font-size:11px;color:rgba(255,255,255,0.5);">Bal: ${balanceStr}</span>
+                            </div>
+                            <div class="proj-note" style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${tx.description || ''}</div>
+                        </div>`;
+                }
+                listEl.innerHTML = html;
+            } catch (e) {
+                listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#ff6b6b;">Failed to load transactions</div>';
+            }
+        }
+        
+        function closeTransactionsPage() {
+            document.getElementById('transactions-page').classList.remove('active');
         }
         
         async function askQuestion(question) {
