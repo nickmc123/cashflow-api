@@ -147,7 +147,19 @@ def get_forecast_from_db():
     return forecast
 
 def get_today_balance():
-    """Get balance for today from forecast or nearest date"""
+    """Get balance from most recent bank transaction, or fall back to forecast"""
+    # First try to get the most recent actual balance from transactions
+    conn = get_db()
+    if conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT balance FROM bank_transactions ORDER BY date DESC, id DESC LIMIT 1")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row and row['balance']:
+            return float(row['balance'])
+    
+    # Fall back to forecast
     forecast = get_forecast_from_db()
     today = datetime.now().strftime("%Y-%m-%d")
     if today in forecast:
@@ -340,22 +352,6 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
             INSERT INTO bank_transactions (date, description, debit, credit, balance)
             VALUES (%s, %s, %s, %s, %s)
         """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx['balance']))
-        
-        # Update forecast with actual balance
-        note = "Actual" if tx['balance'] else ""
-        if tx['debit'] > 50000:
-            note = f"Large debit: ${tx['debit']:,.0f}"
-        elif tx['credit'] > 50000:
-            note = f"Large credit: ${tx['credit']:,.0f}"
-        
-        cur.execute("""
-            INSERT INTO forecast (date, balance, note)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (date) DO UPDATE SET
-                balance = EXCLUDED.balance,
-                note = CASE WHEN EXCLUDED.note != '' THEN EXCLUDED.note ELSE forecast.note END,
-                updated_at = CURRENT_TIMESTAMP
-        """, (tx_date, tx['balance'], note))
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
