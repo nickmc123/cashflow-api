@@ -891,7 +891,9 @@ Examples:
                     document.getElementById(`loading-${loadingId}`).remove();
                     showProjectionPage(data.projection);
                 } else {
-                    document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${data.answer}</div>`;
+                    // Handle both 'answer' and 'text' response formats
+                    const answer = data.answer || data.text || 'No response';
+                    document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${answer}</div>`;
                 }
             } catch (e) {
                 document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">Sorry, couldn't get an answer. Please try again.</div>`;
