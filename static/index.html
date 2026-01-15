@@ -260,6 +260,24 @@
             color: #fff;
         }
         
+        .proj-btn {
+            flex: 1;
+            padding: 10px 8px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            background: linear-gradient(135deg, #FF9500, #FF5E3A);
+            color: #fff;
+            min-width: 44px;
+        }
+        
+        .proj-btn:active {
+            transform: scale(0.95);
+            opacity: 0.9;
+        }
+        
         .loading {
             display: inline-block;
             width: 20px;
@@ -397,42 +415,33 @@ Examples:
     
     <!-- Projection Modal -->
     <div id="projection-modal" class="modal">
-        <div class="modal-content">
-            <h2>📈 Cash Flow Projection</h2>
-            <p style="color: rgba(255,255,255,0.6); margin-bottom: 20px; font-size: 14px;">
-                How far ahead would you like to project?
-            </p>
+        <div class="modal-content" style="padding: 20px; max-width: 320px;">
+            <h2 style="font-size: 18px; margin-bottom: 12px;">📈 Cash Projection</h2>
             
-            <div style="margin-bottom: 20px;">
-                <p style="color: #e94560; font-weight: 600; margin-bottom: 10px; font-size: 14px;">📅 Days</p>
-                <div style="display: flex; gap: 10px;">
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('days', 15)">15</button>
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('days', 30)">30</button>
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('days', 45)">45</button>
+            <div style="display: grid; grid-template-columns: 50px 1fr; gap: 8px 12px; align-items: center;">
+                <span style="color: rgba(255,255,255,0.7); font-size: 13px;">Days</span>
+                <div style="display: flex; gap: 6px;">
+                    <button class="proj-btn" onclick="getProjection('days', 15)">15</button>
+                    <button class="proj-btn" onclick="getProjection('days', 30)">30</button>
+                    <button class="proj-btn" onclick="getProjection('days', 45)">45</button>
+                </div>
+                
+                <span style="color: rgba(255,255,255,0.7); font-size: 13px;">Weeks</span>
+                <div style="display: flex; gap: 6px;">
+                    <button class="proj-btn" onclick="getProjection('weeks', 4)">4</button>
+                    <button class="proj-btn" onclick="getProjection('weeks', 8)">8</button>
+                    <button class="proj-btn" onclick="getProjection('weeks', 12)">12</button>
+                </div>
+                
+                <span style="color: rgba(255,255,255,0.7); font-size: 13px;">Months</span>
+                <div style="display: flex; gap: 6px;">
+                    <button class="proj-btn" onclick="getProjection('months', 6)">6</button>
+                    <button class="proj-btn" onclick="getProjection('months', 9)">9</button>
+                    <button class="proj-btn" onclick="getProjection('months', 12)">12</button>
                 </div>
             </div>
             
-            <div style="margin-bottom: 20px;">
-                <p style="color: #e94560; font-weight: 600; margin-bottom: 10px; font-size: 14px;">📆 Weeks</p>
-                <div style="display: flex; gap: 10px;">
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('weeks', 4)">4</button>
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('weeks', 8)">8</button>
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('weeks', 12)">12</button>
-                </div>
-            </div>
-            
-            <div style="margin-bottom: 20px;">
-                <p style="color: #e94560; font-weight: 600; margin-bottom: 10px; font-size: 14px;">🗓️ Months</p>
-                <div style="display: flex; gap: 10px;">
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('months', 6)">6</button>
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('months', 9)">9</button>
-                    <button class="modal-btn submit" style="flex:1" onclick="getProjection('months', 12)">12</button>
-                </div>
-            </div>
-            
-            <div class="modal-buttons">
-                <button class="modal-btn cancel" onclick="closeProjectionModal()">Cancel</button>
-            </div>
+            <button class="modal-btn cancel" style="width: 100%; margin-top: 15px;" onclick="closeProjectionModal()">Cancel</button>
         </div>
     </div>
 
