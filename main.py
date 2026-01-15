@@ -360,33 +360,60 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     
     cur = conn.cursor()
     
-    # Get existing transactions for deduplication
+    # Get existing transactions for deduplication (use date + desc + amounts, NOT balance)
     min_date = min(tx['date'] for tx in transactions).date()
-    existing = get_existing_transactions(conn, min_date)
+    cur.execute("""
+        SELECT date, description, debit, credit 
+        FROM bank_transactions 
+        WHERE date >= %s
+    """, (min_date - timedelta(days=7),))
+    
+    existing = set()
+    for row in cur.fetchall():
+        # Signature without balance - just date + description + amounts
+        sig = f"{row[0]}|{row[1][:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
+        existing.add(sig)
+    
+    # Get starting balance from most recent transaction
+    cur.execute("""
+        SELECT balance FROM bank_transactions 
+        WHERE balance > 0 
+        ORDER BY date DESC, id DESC 
+        LIMIT 1
+    """)
+    row = cur.fetchone()
+    if row and row[0]:
+        running_balance = float(row[0])
+    else:
+        # Fall back to forecast
+        running_balance = get_today_balance()
+    
+    # Sort transactions by date (oldest first) to calculate running balance
+    transactions.sort(key=lambda x: x['date'])
     
     added_count = 0
     skipped_count = 0
-    latest_balance = None
     
-    # Insert transactions and update forecast with actual balances
     for tx in transactions:
         tx_date = tx['date'].date() if hasattr(tx['date'], 'date') else tx['date']
         
-        # Check for duplicate
-        sig = f"{tx_date}|{tx['description'][:30] if tx['description'] else ''}|{tx['debit']}|{tx['credit']}|{tx['balance']}"
+        # Check for duplicate (without balance in signature)
+        sig = f"{tx_date}|{tx['description'][:50] if tx['description'] else ''}|{float(tx['debit']):.2f}|{float(tx['credit']):.2f}"
         if sig in existing:
             skipped_count += 1
             continue
         
-        # Insert transaction
+        # Calculate new balance
+        running_balance = running_balance + float(tx['credit']) - float(tx['debit'])
+        
+        # Insert transaction with calculated balance
         cur.execute("""
             INSERT INTO bank_transactions (date, description, debit, credit, balance)
             VALUES (%s, %s, %s, %s, %s)
-        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx['balance']))
+        """, (tx_date, tx['description'], tx['debit'], tx['credit'], running_balance))
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
-        latest_balance = tx['balance']
     
     conn.commit()
     cur.close()
@@ -397,7 +424,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         "message": f"Added {added_count} new transactions" + (f", skipped {skipped_count} duplicates" if skipped_count else ""),
         "added": added_count,
         "skipped": skipped_count,
-        "latest_balance": latest_balance
+        "latest_balance": running_balance
     }
 
 
