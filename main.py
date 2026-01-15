@@ -26,6 +26,22 @@ def verify_code(code: str):
     if code != ACCESS_CODE:
         raise HTTPException(status_code=401, detail="Invalid access code")
 
+# Simple Cash Flow Profit Calculation (Rolling 30-Day Average)
+# Method: Cash In - Cash Out = Profit
+# Excludes payroll from expense analysis per user instructions
+
+ROLLING_30_DAY = {
+    "cash_in": 285000,      # 30-day deposits (CC processors + wires + e-deposits)
+    "cash_out": 199500,     # 30-day ops debits (excludes payroll)
+    "gross_profit": 85500,  # Cash In - Cash Out
+}
+
+# Payroll is tracked separately: ~$103K per cycle x 2 = ~$206K/month
+MONTHLY_PAYROLL = 206000
+
+# Net profit after payroll
+NET_MONTHLY_PROFIT = ROLLING_30_DAY["gross_profit"] - MONTHLY_PAYROLL  # Typically negative due to payroll
+
 # Forecast data
 FORECAST = {
     "2026-01-13": {"balance": 245000, "note": "Starting balance confirmed"},
@@ -65,6 +81,42 @@ class DataSubmission(BaseModel):
 
 def interpret_question(q: str) -> str:
     q_lower = q.lower()
+    
+    # Profit questions
+    if any(w in q_lower for w in ['profit', 'margin', 'making', 'earn', 'net', 'gross']):
+        return f"""**Monthly Average Profit** (Rolling 30-Day Cash Flow Method)
+
+💵 **Cash In:** ${ROLLING_30_DAY['cash_in']:,}/month
+💸 **Cash Out:** ${ROLLING_30_DAY['cash_out']:,}/month (ops only, excludes payroll)
+
+📈 **Gross Profit: ${ROLLING_30_DAY['gross_profit']:,}/month**
+
+👥 **After Payroll (~$206K/month):**
+Net: ${NET_MONTHLY_PROFIT:,}/month
+
+📝 *Simple cash flow method: Cash In - Cash Out = Profit*"""
+    
+    # Revenue questions  
+    if any(w in q_lower for w in ['revenue', 'income', 'sales', 'bringing in', 'cash in']):
+        return f"""**Monthly Cash In: ${ROLLING_30_DAY['cash_in']:,}** (30-day rolling avg)
+
+📥 Sources:
+• CC Processors (Paymentech, CMS, AmEx)
+• Wire income (~$14K/week)
+• E-deposits (checks)"""
+    
+    # Expenses questions
+    if any(w in q_lower for w in ['expense', 'cost', 'spending', 'burn', 'overhead', 'cash out']):
+        return f"""**Monthly Cash Out:** (30-day rolling avg)
+
+🏢 **Ops:** ${ROLLING_30_DAY['cash_out']:,}/month
+• Daily ops: $15-18K/day
+• Includes refund checks
+
+👥 **Payroll:** ~$206K/month (tracked separately)
+• $75K salary x 2 cycles + taxes + 401K + ADP
+
+📊 **Total: ~${ROLLING_30_DAY['cash_out'] + MONTHLY_PAYROLL:,}/month**"""
     
     # Current balance
     if any(w in q_lower for w in ['current', 'balance now', 'how much', 'what is the balance', "what's the balance"]):
@@ -114,7 +166,7 @@ def interpret_question(q: str) -> str:
             return f"**{date_key}:** Balance projected at **${f['balance']:,}**\n{f['note']}"
         return f"I don't have a specific projection for {date_key}, but I can give you the overall trend."
     
-    return "I can help with: current balance, low points, peaks, distribution timing, AmEx payments, payroll dates, or specific date lookups. What would you like to know?"
+    return "I can help with: current balance, low points, peaks, distribution timing, AmEx payments, payroll dates, profit, or specific date lookups. What would you like to know?"
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -182,6 +234,19 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
     verify_code(code)
     answer = interpret_question(question)
     return {"question": question, "answer": answer}
+
+@app.get("/profit")
+async def get_profit(code: str = Query(...)):
+    verify_code(code)
+    return {
+        "method": "Rolling 30-Day Cash Flow",
+        "cash_in": ROLLING_30_DAY["cash_in"],
+        "cash_out_ops": ROLLING_30_DAY["cash_out"],
+        "gross_profit": ROLLING_30_DAY["gross_profit"],
+        "monthly_payroll": MONTHLY_PAYROLL,
+        "net_profit": NET_MONTHLY_PROFIT,
+        "note": "Gross profit excludes payroll; Net includes payroll"
+    }
 
 @app.post("/submit-data")
 async def submit_data(code: str = Query(...), submission: DataSubmission = None):
