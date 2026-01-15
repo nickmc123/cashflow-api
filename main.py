@@ -470,7 +470,7 @@ async def get_balance(date: str, code: str = Query(...)):
         return {"date": date, "balance": forecast[date]["balance"], "note": forecast[date].get("note", "")}
     raise HTTPException(status_code=404, detail=f"No forecast for {date}")
 
-@app.post("/ask")
+@app.get("/ask")
 async def ask_question(code: str = Query(...), question: str = Query(...)):
     verify_code(code)
     q = question.lower()
