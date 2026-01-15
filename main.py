@@ -459,6 +459,74 @@ async def get_transactions(
     }
 
 # Projection generators
+# Special transactions calendar
+SPECIAL_TRANSACTIONS = {
+    # AmEx payments
+    "2026-01-16": [{"type": "amex", "amount": -106000, "desc": "AmEx Payment"}],
+    "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
+    "2026-02-13": [{"type": "amex", "amount": -100000, "desc": "AmEx Payment"}],
+    # Payroll (Feb 3 and Feb 18)
+    "2026-02-03": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 1"}],
+    "2026-02-04": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 2"}],
+    "2026-02-05": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 3"}, {"type": "payroll_tax", "amount": -28500, "desc": "Taxes + 401K + ADP"}],
+    "2026-02-18": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 1"}],
+    "2026-02-19": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 2"}],
+    "2026-02-20": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 3"}, {"type": "payroll_tax", "amount": -28500, "desc": "Taxes + 401K + ADP"}],
+}
+
+# Daily averages for credits
+DAILY_AUTHNET = 8500  # CC processor deposits (Paymentech, CMS, AmEx)
+DAILY_CHECK_DEPOSITS = {
+    0: 10000,  # Monday (lower)
+    1: 26000,  # Tuesday
+    2: 26000,  # Wednesday
+    3: 16000,  # Thursday
+    4: 20000,  # Friday
+}
+DAILY_WIRE = 2800  # ~$14K/week from CFI and FRE
+DAILY_OPS = 16500  # Daily operational debits
+MONTHLY_RENT = 8500  # Approximate monthly rent
+MONTHLY_RECURRING = 5000  # Insurance, utilities, etc.
+
+def get_daily_detail(date: datetime, forecast: dict) -> dict:
+    """Get detailed breakdown for a single day"""
+    date_str = date.strftime("%Y-%m-%d")
+    dow = date.weekday()
+    is_weekend = dow >= 5
+    
+    # Start with base structure
+    detail = {
+        "credits": {"authnet": 0, "checks": 0, "wires": 0, "total": 0},
+        "debits": {"ops": 0, "total": 0},
+        "special": [],
+        "net": 0
+    }
+    
+    if is_weekend:
+        return detail
+    
+    # Normal credits on weekdays
+    detail["credits"]["authnet"] = DAILY_AUTHNET
+    detail["credits"]["checks"] = DAILY_CHECK_DEPOSITS.get(dow, 15000)
+    detail["credits"]["wires"] = DAILY_WIRE if dow in [1, 3] else 0  # Tue/Thu
+    detail["credits"]["total"] = detail["credits"]["authnet"] + detail["credits"]["checks"] + detail["credits"]["wires"]
+    
+    # Normal debits on weekdays
+    detail["debits"]["ops"] = DAILY_OPS
+    detail["debits"]["total"] = DAILY_OPS
+    
+    # Add special transactions
+    if date_str in SPECIAL_TRANSACTIONS:
+        for txn in SPECIAL_TRANSACTIONS[date_str]:
+            detail["special"].append(txn)
+            if txn["amount"] < 0:
+                detail["debits"]["total"] += abs(txn["amount"])
+    
+    # Calculate net
+    detail["net"] = detail["credits"]["total"] - detail["debits"]["total"]
+    
+    return detail
+
 def generate_daily_projection(days: int) -> dict:
     forecast = get_forecast_from_db()
     start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -469,8 +537,6 @@ def generate_daily_projection(days: int) -> dict:
     else:
         start_balance = get_today_balance()
     
-    daily_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) / 30
-    
     rows = []
     balance = start_balance
     low_bal, low_date, low_note = float('inf'), None, ""
@@ -480,13 +546,14 @@ def generate_daily_projection(days: int) -> dict:
         date = start_date + timedelta(days=i)
         date_str = date.strftime("%Y-%m-%d")
         
+        detail = get_daily_detail(date, forecast)
+        
         note = ""
         if date_str in forecast:
             balance = forecast[date_str]["balance"]
             note = forecast[date_str].get("note", "")
         else:
-            if date.weekday() < 5:
-                balance = int(balance + daily_net)
+            balance = int(balance + detail["net"])
         
         if balance < low_bal:
             low_bal, low_date, low_note = balance, date.strftime("%b %d"), note
@@ -496,7 +563,10 @@ def generate_daily_projection(days: int) -> dict:
         rows.append({
             "date": date.strftime("%a %b %d"),
             "balance": balance,
-            "note": note
+            "note": note,
+            "credits": detail["credits"],
+            "debits": detail["debits"],
+            "special": detail["special"]
         })
     
     return {
@@ -518,38 +588,67 @@ def generate_weekly_projection(weeks: int) -> dict:
     else:
         start_balance = get_today_balance()
     
-    weekly_net = ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out'] - (MONTHLY_PAYROLL / 4)
-    
     rows = []
     balance = start_balance
-    low_bal, low_date = float('inf'), None
-    high_bal, high_date = 0, None
+    overall_low, overall_high = float('inf'), 0
     
     for i in range(weeks):
         week_start = start_date + timedelta(weeks=i)
         week_end = week_start + timedelta(days=6)
         
-        note = ""
-        week_balance = balance
+        # Aggregate week data
+        week_credits = {"authnet": 0, "checks": 0, "wires": 0, "total": 0}
+        week_debits = {"ops": 0, "total": 0}
+        week_special = {"amex": 0, "payroll": 0, "payroll_tax": 0, "rent": 0, "recurring": 0, "distribution": 0}
+        week_low, week_high = float('inf'), 0
+        
         for j in range(7):
             d = week_start + timedelta(days=j)
             d_str = d.strftime("%Y-%m-%d")
+            detail = get_daily_detail(d, forecast)
+            
+            # Accumulate credits
+            week_credits["authnet"] += detail["credits"]["authnet"]
+            week_credits["checks"] += detail["credits"]["checks"]
+            week_credits["wires"] += detail["credits"]["wires"]
+            week_credits["total"] += detail["credits"]["total"]
+            
+            # Accumulate debits
+            week_debits["ops"] += detail["debits"]["ops"]
+            
+            # Accumulate special
+            for txn in detail["special"]:
+                if txn["type"] in week_special:
+                    week_special[txn["type"]] += abs(txn["amount"])
+            
+            # Track daily balance for range
             if d_str in forecast:
-                week_balance = forecast[d_str]["balance"]
-                if forecast[d_str].get("note"):
-                    note = forecast[d_str]["note"]
+                day_bal = forecast[d_str]["balance"]
+            else:
+                balance = int(balance + detail["net"])
+                day_bal = balance
+            
+            week_low = min(week_low, day_bal)
+            week_high = max(week_high, day_bal)
         
-        balance = week_balance if week_balance != balance else int(balance + weekly_net)
+        week_debits["total"] = week_debits["ops"] + sum(week_special.values())
         
-        if balance < low_bal:
-            low_bal, low_date = balance, week_start.strftime("%b %d")
-        if balance > high_bal:
-            high_bal, high_date = balance, week_start.strftime("%b %d")
+        # Update overall tracking
+        overall_low = min(overall_low, week_low)
+        overall_high = max(overall_high, week_high)
+        
+        # Get end-of-week balance
+        week_end_str = week_end.strftime("%Y-%m-%d")
+        if week_end_str in forecast:
+            balance = forecast[week_end_str]["balance"]
         
         rows.append({
             "date": f"Week of {week_start.strftime('%b %d')}",
             "balance": balance,
-            "note": note
+            "credits": week_credits,
+            "debits": week_debits,
+            "special": week_special,
+            "range": {"low": week_low, "high": week_high}
         })
     
     return {
@@ -557,41 +656,85 @@ def generate_weekly_projection(weeks: int) -> dict:
         "title": f"{weeks}-Week Projection",
         "period": "weekly",
         "rows": rows,
-        "low": {"value": low_bal, "label": low_date, "note": ""},
-        "high": {"value": high_bal, "label": high_date, "note": ""}
+        "low": {"value": overall_low, "label": "", "note": ""},
+        "high": {"value": overall_high, "label": "", "note": ""}
     }
 
 def generate_monthly_projection(months: int) -> dict:
+    forecast = get_forecast_from_db()
     start_balance = get_today_balance()
-    monthly_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) * 30 / 30 - MONTHLY_PAYROLL
     
     rows = []
     balance = start_balance
-    low_bal, low_date = float('inf'), None
-    high_bal, high_date = 0, None
+    overall_low, overall_high = float('inf'), 0
     
-    current = datetime.now().replace(day=1)
+    current = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     
     for i in range(months):
-        month_date = current + timedelta(days=32*i)
-        month_date = month_date.replace(day=1)
-        
-        note = ""
         if i == 0:
-            note = "Current month"
+            month_date = current
+        else:
+            month_date = (current + timedelta(days=32*i)).replace(day=1)
         
-        if i > 0:
-            balance = int(balance + monthly_net)
+        # Get days in month
+        if month_date.month == 12:
+            next_month = month_date.replace(year=month_date.year+1, month=1)
+        else:
+            next_month = month_date.replace(month=month_date.month+1)
+        days_in_month = (next_month - month_date).days
         
-        if balance < low_bal:
-            low_bal, low_date = balance, month_date.strftime("%b %Y")
-        if balance > high_bal:
-            high_bal, high_date = balance, month_date.strftime("%b %Y")
+        # Aggregate month data
+        month_credits = {"authnet": 0, "checks": 0, "wires": 0, "total": 0}
+        month_debits = {"ops": 0, "total": 0}
+        month_special = {"amex": 0, "payroll": 0, "payroll_tax": 0, "rent": 0, "recurring": 0, "distribution": 0}
+        month_low, month_high = float('inf'), 0
+        
+        for j in range(days_in_month):
+            d = month_date + timedelta(days=j)
+            d_str = d.strftime("%Y-%m-%d")
+            detail = get_daily_detail(d, forecast)
+            
+            # Accumulate credits
+            month_credits["authnet"] += detail["credits"]["authnet"]
+            month_credits["checks"] += detail["credits"]["checks"]
+            month_credits["wires"] += detail["credits"]["wires"]
+            month_credits["total"] += detail["credits"]["total"]
+            
+            # Accumulate debits
+            month_debits["ops"] += detail["debits"]["ops"]
+            
+            # Accumulate special
+            for txn in detail["special"]:
+                if txn["type"] in month_special:
+                    month_special[txn["type"]] += abs(txn["amount"])
+            
+            # Track daily balance for range
+            if d_str in forecast:
+                day_bal = forecast[d_str]["balance"]
+            else:
+                balance = int(balance + detail["net"])
+                day_bal = balance
+            
+            month_low = min(month_low, day_bal)
+            month_high = max(month_high, day_bal)
+        
+        # Add monthly recurring expenses
+        month_special["rent"] = MONTHLY_RENT
+        month_special["recurring"] = MONTHLY_RECURRING
+        
+        month_debits["total"] = month_debits["ops"] + sum(month_special.values())
+        
+        # Update overall tracking
+        overall_low = min(overall_low, month_low)
+        overall_high = max(overall_high, month_high)
         
         rows.append({
             "date": month_date.strftime("%B %Y"),
             "balance": balance,
-            "note": note
+            "credits": month_credits,
+            "debits": month_debits,
+            "special": month_special,
+            "range": {"low": month_low, "high": month_high}
         })
     
     return {
@@ -599,8 +742,8 @@ def generate_monthly_projection(months: int) -> dict:
         "title": f"{months}-Month Projection",
         "period": "monthly",
         "rows": rows,
-        "low": {"value": low_bal, "label": low_date, "note": ""},
-        "high": {"value": high_bal, "label": high_date, "note": ""}
+        "low": {"value": overall_low, "label": "", "note": ""},
+        "high": {"value": overall_high, "label": "", "note": ""}
     }
 
 @app.get("/summary")
