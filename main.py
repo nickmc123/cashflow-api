@@ -85,83 +85,140 @@ def generate_daily_projection(days: int) -> str:
     from datetime import datetime, timedelta
     start_date = datetime(2026, 1, 13)
     start_balance = 245000
-    daily_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) / 30  # ~$2,850/day net
+    daily_net = (ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out']) / 30
     
-    lines = [f"**📅 {days}-Day Cash Projection**\n"]
-    lines.append("| Date | Projected Balance | Notes |")
-    lines.append("|------|------------------|-------|")
+    lines = [f"📅 **{days}-Day Projection**\n"]
     
     balance = start_balance
+    low_bal, low_date = float('inf'), None
+    high_bal, high_date = 0, None
+    
+    entries = []
     for i in range(days):
         date = start_date + timedelta(days=i)
         date_str = date.strftime("%Y-%m-%d")
         
-        # Check for known events
         note = ""
         if date_str in FORECAST:
             balance = FORECAST[date_str]["balance"]
             note = FORECAST[date_str].get("note", "")
         else:
-            # Estimate based on rolling average
-            if date.weekday() >= 5:  # Weekend
-                balance = balance  # No change
-                note = "Weekend"
+            if date.weekday() >= 5:
+                note = "🔸"
             else:
                 balance = int(balance + daily_net)
         
-        lines.append(f"| {date.strftime('%b %d')} | ${balance:,} | {note} |")
+        if balance < low_bal:
+            low_bal, low_date = balance, date
+        if balance > high_bal:
+            high_bal, high_date = balance, date
+        
+        # Format: emoji indicator based on balance level
+        if balance < 200000:
+            indicator = "🔴"
+        elif balance < 250000:
+            indicator = "🟡"
+        else:
+            indicator = "🟢"
+        
+        day_name = date.strftime("%a")
+        date_fmt = date.strftime("%b %d")
+        entry = f"{indicator} **{day_name} {date_fmt}**: ${balance:,}"
+        if note and note != "🔸":
+            entry += f" _{note}_"
+        entries.append(entry)
+    
+    # Show entries
+    lines.extend(entries)
+    
+    # Summary
+    lines.append("\n─────────────")
+    lines.append(f"🔴 **Low**: ${low_bal:,} ({low_date.strftime('%b %d')})")
+    lines.append(f"🟢 **High**: ${high_bal:,} ({high_date.strftime('%b %d')})")
     
     return "\n".join(lines)
 
 def generate_weekly_projection(weeks: int) -> str:
     from datetime import datetime, timedelta
     start_date = datetime(2026, 1, 13)
-    weekly_net = ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out'] - (MONTHLY_PAYROLL / 4)  # Weekly after payroll
+    weekly_net = ROLLING_30_DAY['cash_in'] - ROLLING_30_DAY['cash_out'] - (MONTHLY_PAYROLL / 4)
     
-    lines = [f"**📆 {weeks}-Week Cash Projection**\n"]
-    lines.append("| Week | End Date | Projected Balance |")
-    lines.append("|------|----------|-------------------|")
+    lines = [f"📆 **{weeks}-Week Projection**\n"]
+    
+    low_bal, low_wk = float('inf'), None
+    high_bal, high_wk = 0, None
     
     for i in range(weeks):
         end_date = start_date + timedelta(weeks=i+1)
         date_str = end_date.strftime("%Y-%m-%d")
         
-        # Find closest known date or estimate
         if date_str in FORECAST:
             balance = FORECAST[date_str]["balance"]
         else:
-            # Estimate
             balance = 245000 + int(weekly_net * (i + 1) / 4)
-            balance = max(150000, min(400000, balance))  # Reasonable bounds
+            balance = max(150000, min(400000, balance))
         
-        lines.append(f"| Week {i+1} | {end_date.strftime('%b %d')} | ${balance:,} |")
+        if balance < low_bal:
+            low_bal, low_wk = balance, i+1
+        if balance > high_bal:
+            high_bal, high_wk = balance, i+1
+        
+        if balance < 200000:
+            indicator = "🔴"
+        elif balance < 250000:
+            indicator = "🟡"
+        else:
+            indicator = "🟢"
+        
+        lines.append(f"{indicator} **Week {i+1}** ({end_date.strftime('%b %d')}): ${balance:,}")
+    
+    lines.append("\n─────────────")
+    lines.append(f"🔴 **Low**: ${low_bal:,} (Week {low_wk})")
+    lines.append(f"🟢 **High**: ${high_bal:,} (Week {high_wk})")
     
     return "\n".join(lines)
 
 def generate_monthly_projection(months: int) -> str:
-    lines = [f"**🗓️ {months}-Month Cash Projection**\n"]
-    lines.append("| Month | Projected Balance | Notes |")
-    lines.append("|-------|------------------|-------|")
+    lines = [f"🗓️ **{months}-Month Projection**\n"]
     
-    # Monthly estimates based on current patterns
     monthly_data = [
         ("Jan 2026", 230000, "After $130K AmEx"),
         ("Feb 2026", 341000, "Strong recovery"),
-        ("Mar 2026", 320000, "Typical operations"),
-        ("Apr 2026", 310000, "Seasonal adjustment"),
+        ("Mar 2026", 320000, "Typical ops"),
+        ("Apr 2026", 310000, "Seasonal adj"),
         ("May 2026", 330000, "Summer pickup"),
-        ("Jun 2026", 350000, "Peak season starts"),
+        ("Jun 2026", 350000, "Peak starts"),
         ("Jul 2026", 380000, "Peak summer"),
         ("Aug 2026", 390000, "Peak summer"),
         ("Sep 2026", 360000, "Post-summer"),
-        ("Oct 2026", 340000, "Fall operations"),
+        ("Oct 2026", 340000, "Fall ops"),
         ("Nov 2026", 320000, "Pre-holiday"),
-        ("Dec 2026", 300000, "Holiday slowdown"),
+        ("Dec 2026", 300000, "Holiday"),
     ]
+    
+    low_bal, low_month = float('inf'), None
+    high_bal, high_month = 0, None
     
     for i in range(min(months, 12)):
         month, balance, note = monthly_data[i]
-        lines.append(f"| {month} | ${balance:,} | {note} |")
+        
+        if balance < low_bal:
+            low_bal, low_month = balance, month
+        if balance > high_bal:
+            high_bal, high_month = balance, month
+        
+        if balance < 250000:
+            indicator = "🔴"
+        elif balance < 300000:
+            indicator = "🟡"
+        else:
+            indicator = "🟢"
+        
+        lines.append(f"{indicator} **{month}**: ${balance:,} _{note}_")
+    
+    lines.append("\n─────────────")
+    lines.append(f"🔴 **Low**: ${low_bal:,} ({low_month})")
+    lines.append(f"🟢 **High**: ${high_bal:,} ({high_month})")
     
     return "\n".join(lines)
 
