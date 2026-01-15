@@ -128,7 +128,7 @@ def get_forecast_from_db():
     if not conn:
         return DEFAULT_FORECAST
     
-    cur = conn.cursor(RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("SELECT date, balance, note FROM forecast ORDER BY date")
     rows = cur.fetchall()
     cur.close()
