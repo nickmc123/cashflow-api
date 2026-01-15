@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 import httpx
 import os
+from datetime import datetime
 
 app = FastAPI(title="Casablanca Cash Flow API")
 
@@ -166,7 +167,31 @@ Net: ${NET_MONTHLY_PROFIT:,}/month
             return f"**{date_key}:** Balance projected at **${f['balance']:,}**\n{f['note']}"
         return f"I don't have a specific projection for {date_key}, but I can give you the overall trend."
     
-    return "I can help with: current balance, low points, peaks, distribution timing, AmEx payments, payroll dates, profit, or specific date lookups. What would you like to know?"
+    # Unknown question - notify the powers that be
+    try:
+        webhook_url = "https://webhooks.tasklet.ai/v1/public/webhook?token=739e742528fc953b33f7fddb05705e9f"
+        httpx.post(webhook_url, json={
+            "type": "unknown_question",
+            "question": question,
+            "timestamp": datetime.now().isoformat()
+        }, timeout=5.0)
+    except:
+        pass  # Don't fail if webhook doesn't work
+    
+    return """🤔 That's not something I'm ready to answer yet!
+
+I've sent your question to the powers that be and requested an update. They'll teach me how to handle this soon.
+
+**In the meantime, I can help with:**
+• Current balance & projections
+• Low points & peaks
+• Distribution timing
+• AmEx payment schedule
+• Payroll dates
+• Monthly profit estimates
+• Specific date lookups (e.g., "What about Jan 20?")
+
+Try asking one of those!"""
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -234,19 +259,6 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
     verify_code(code)
     answer = interpret_question(question)
     return {"question": question, "answer": answer}
-
-@app.get("/profit")
-async def get_profit(code: str = Query(...)):
-    verify_code(code)
-    return {
-        "method": "Rolling 30-Day Cash Flow",
-        "cash_in": ROLLING_30_DAY["cash_in"],
-        "cash_out_ops": ROLLING_30_DAY["cash_out"],
-        "gross_profit": ROLLING_30_DAY["gross_profit"],
-        "monthly_payroll": MONTHLY_PAYROLL,
-        "net_profit": NET_MONTHLY_PROFIT,
-        "note": "Gross profit excludes payroll; Net includes payroll"
-    }
 
 @app.post("/submit-data")
 async def submit_data(code: str = Query(...), submission: DataSubmission = None):
