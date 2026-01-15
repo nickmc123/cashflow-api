@@ -72,10 +72,40 @@ def init_db():
     cur.close()
     conn.close()
 
+def populate_forecast_if_needed():
+    """Populate forecast table with default data if empty or stale"""
+    conn = get_db()
+    if not conn:
+        return
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    # Check if we have proper forecast data (not just transaction-based entries)
+    cur.execute("SELECT COUNT(*) as cnt FROM forecast WHERE note != 'Actual' OR note IS NULL")
+    result = cur.fetchone()
+    proper_count = result['cnt'] if result else 0
+    
+    if proper_count < 10:  # Need to repopulate
+        # Clear existing forecast
+        cur.execute("DELETE FROM forecast")
+        
+        # Insert default forecast
+        for date_str, data in DEFAULT_FORECAST.items():
+            cur.execute("""
+                INSERT INTO forecast (date, balance, note)
+                VALUES (%s, %s, %s)
+            """, (date_str, data['balance'], data.get('note', '')))
+        
+        conn.commit()
+        print(f"Populated forecast with {len(DEFAULT_FORECAST)} entries")
+    
+    cur.close()
+    conn.close()
+
 # Initialize on startup
 @app.on_event("startup")
 async def startup():
     init_db()
+    populate_forecast_if_needed()
 
 def verify_code(code: str):
     if code != ACCESS_CODE:
