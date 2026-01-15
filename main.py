@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import os
+from typing import Optional
 
-app = FastAPI(title="Casablanca Cash Flow API", version="1.0")
+app = FastAPI(title="Casablanca Cash Flow API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,82 +13,93 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cash flow data - updated Jan 14, 2026
+# Access code for authentication
+ACCESS_CODE = "cflownk"
+
+def verify_access(access_code: str = Query(None, alias="code"), x_access_code: str = Header(None)):
+    """Verify access code from query param or header"""
+    code = access_code or x_access_code
+    if code != ACCESS_CODE:
+        raise HTTPException(status_code=401, detail="Invalid or missing access code. Use ?code=YOUR_CODE or X-Access-Code header.")
+    return True
+
+# Current forecast data
 FORECAST = {
-    "current_balance": 245000,
-    "low_point": {"date": "Jan 20", "balance": 184000},
-    "jan_31": 224000,
-    "feb_20": 289000,
-    "feb_24": 341000,
-    "major_payments": [
-        {"date": "Jan 16", "desc": "AmEx", "amount": 106000},
-        {"date": "Jan 20-22", "desc": "Payroll #1", "amount": 103000},
-        {"date": "Jan 30", "desc": "AmEx", "amount": 130000},
-        {"date": "Feb 3-5", "desc": "Payroll #2", "amount": 103000},
-        {"date": "Feb 13", "desc": "AmEx", "amount": 100000},
-        {"date": "Feb 18-20", "desc": "Payroll #3", "amount": 103000},
+    "last_updated": "2026-01-14",
+    "starting_balance": 245000,
+    "starting_date": "2026-01-13",
+    "low_point": {"date": "2026-01-20", "balance": 184000, "note": "After daily ops, before deposits"},
+    "jan30_balance": 224000,
+    "feb12_peak": 369000,
+    "feb24_projection": 341000,
+    "key_payments": [
+        {"date": "2026-01-16", "amount": 106000, "payee": "AmEx"},
+        {"date": "2026-01-31", "amount": 130000, "payee": "AmEx"},
+        {"date": "2026-02-13", "amount": 100000, "payee": "AmEx"},
     ],
-    "daily_income": {
-        "e_deposits": {"mon": 10000, "tue": 26000, "wed": 26000, "thu": 16000, "fri": 20000},
-        "cc_revenue": 20000,
-        "wires": 3000,
-    },
-    "daily_ops": 15000,
+    "payroll_dates": ["2026-02-03", "2026-02-18"],
+    "daily_ops_estimate": "15000-18000",
+    "distribution_window": {"best_date": "2026-02-12", "amount": 50000, "balance_after": 234000}
 }
 
 class Question(BaseModel):
     question: str
 
 @app.get("/")
-def root():
-    return {"status": "ok", "message": "Casablanca Cash Flow API"}
+def health():
+    return {"status": "ok", "service": "Casablanca Cash Flow API", "auth_required": True}
 
 @app.get("/forecast")
-def get_forecast():
+def get_forecast(code: str = Query(..., description="Access code")):
+    verify_access(code)
     return FORECAST
 
 @app.get("/balance/{date}")
-def get_balance(date: str):
-    """Get projected balance for a specific date (format: jan20, feb15, etc)"""
-    date_balances = {
-        "jan14": 279000, "jan15": 278000, "jan16": 200000, "jan20": 184000,
-        "jan21": 189000, "jan22": 188000, "jan23": 216000, "jan30": 224000,
-        "jan31": 224000, "feb3": 226000, "feb13": 297000, "feb20": 289000,
-        "feb24": 341000,
+def get_balance(date: str, code: str = Query(..., description="Access code")):
+    verify_access(code)
+    balances = {
+        "jan13": {"date": "2026-01-13", "balance": 245000, "type": "actual"},
+        "jan16": {"date": "2026-01-16", "balance": 195000, "type": "projected", "note": "After $106K AmEx"},
+        "jan20": {"date": "2026-01-20", "balance": 184000, "type": "projected", "note": "Low point"},
+        "jan30": {"date": "2026-01-30", "balance": 224000, "type": "projected"},
+        "feb12": {"date": "2026-02-12", "balance": 369000, "type": "projected", "note": "Peak before AmEx"},
+        "feb24": {"date": "2026-02-24", "balance": 341000, "type": "projected"},
     }
-    key = date.lower().replace(" ", "").replace("-", "")
-    if key in date_balances:
-        return {"date": date, "projected_balance": date_balances[key]}
-    raise HTTPException(status_code=404, detail=f"No projection for {date}")
+    key = date.lower().replace("-", "").replace("2026", "")
+    if key in balances:
+        return balances[key]
+    return {"error": f"No projection for {date}", "available": list(balances.keys())}
 
 @app.get("/low-point")
-def get_low_point():
+def get_low_point(code: str = Query(..., description="Access code")):
+    verify_access(code)
     return FORECAST["low_point"]
 
+@app.get("/summary")
+def get_summary(code: str = Query(..., description="Access code")):
+    verify_access(code)
+    return {
+        "current_balance": f"${FORECAST['starting_balance']:,} as of {FORECAST['starting_date']}",
+        "low_point": f"${FORECAST['low_point']['balance']:,} on {FORECAST['low_point']['date']}",
+        "january_outlook": "Tight but manageable - lowest at $184K on Jan 20",
+        "february_outlook": "Strong recovery to $369K by Feb 12",
+        "distribution_timing": "Best to take $50K distribution around Feb 12"
+    }
+
 @app.post("/ask")
-def ask_question(q: Question):
-    """Simple Q&A about cash flow"""
+def ask_question(q: Question, code: str = Query(..., description="Access code")):
+    verify_access(code)
     question = q.question.lower()
     
-    if "low" in question or "minimum" in question:
-        return {"answer": f"Low point is ${FORECAST['low_point']['balance']:,} on {FORECAST['low_point']['date']}"}
-    
-    if "current" in question or "today" in question or "now" in question:
-        return {"answer": f"Current balance is ${FORECAST['current_balance']:,}"}
-    
-    if "feb 24" in question or "february 24" in question:
-        return {"answer": f"Projected balance on Feb 24 is ${FORECAST['feb_24']:,}"}
-    
-    if "payroll" in question:
-        payrolls = [p for p in FORECAST['major_payments'] if 'Payroll' in p['desc']]
-        return {"answer": f"Upcoming payrolls: " + ", ".join([f"{p['date']} (${p['amount']:,})" for p in payrolls])}
-    
-    if "amex" in question or "american express" in question:
-        amex = [p for p in FORECAST['major_payments'] if 'AmEx' in p['desc']]
-        return {"answer": f"AmEx payments: " + ", ".join([f"{p['date']} (${p['amount']:,})" for p in amex])}
-    
-    return {"answer": "Try asking about: current balance, low point, Feb 24 projection, payroll dates, or AmEx payments"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    if "balance" in question or "current" in question:
+        return {"answer": f"Current balance is ${FORECAST['starting_balance']:,} as of {FORECAST['starting_date']}"}
+    elif "low" in question:
+        return {"answer": f"Low point will be ${FORECAST['low_point']['balance']:,} on {FORECAST['low_point']['date']}"}
+    elif "amex" in question or "payment" in question:
+        return {"answer": "AmEx payments: $106K on Jan 16, $130K on Jan 31, $100K mid-Feb"}
+    elif "distribution" in question:
+        return {"answer": "Best time for $50K distribution is Feb 12 when balance peaks at $369K"}
+    elif "payroll" in question:
+        return {"answer": "Payroll dates: Feb 3 and Feb 18 (~$103K total each time)"}
+    else:
+        return {"answer": "Try asking about: balance, low point, amex payments, distribution, or payroll"}
