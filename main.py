@@ -502,6 +502,107 @@ async def recalculate_balances(code: str = Query(...)):
     }
 
 
+@app.post("/set-balance")
+async def set_balance(
+    code: str = Query(...),
+    balance: float = Query(..., description="Current balance to set"),
+    as_of_date: Optional[str] = Query(default=None, description="Date for the balance (defaults to most recent transaction date)")
+):
+    """Set current balance and recalculate all prior transaction balances backwards"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Determine the anchor date
+    if as_of_date:
+        anchor_date = datetime.strptime(as_of_date, "%Y-%m-%d").date()
+    else:
+        # Use the most recent transaction date
+        cur.execute("SELECT MAX(date) as max_date FROM bank_transactions")
+        row = cur.fetchone()
+        anchor_date = row['max_date'] if row and row['max_date'] else datetime.now().date()
+    
+    # Get all transactions ordered by date DESC, id DESC (newest first)
+    cur.execute("""
+        SELECT id, date, debit, credit, balance 
+        FROM bank_transactions 
+        ORDER BY date DESC, id DESC
+    """)
+    rows = cur.fetchall()
+    
+    if not rows:
+        cur.close()
+        conn.close()
+        return {"status": "error", "message": "No transactions found"}
+    
+    # Start with the provided balance
+    running_balance = balance
+    updated_count = 0
+    anchor_found = False
+    
+    for row in rows:
+        # Find the first transaction on or before anchor date to set as anchor
+        if not anchor_found and row['date'] <= anchor_date:
+            anchor_found = True
+        
+        if anchor_found:
+            # Update this transaction's balance
+            cur.execute("""
+                UPDATE bank_transactions SET balance = %s WHERE id = %s
+            """, (running_balance, row['id']))
+            updated_count += 1
+            
+            # Work backwards: previous balance = current balance + debit - credit
+            running_balance = running_balance + float(row['debit']) - float(row['credit'])
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    # Also update the forecast starting balance
+    update_forecast_balance(balance)
+    
+    return {
+        "status": "success",
+        "updated": updated_count,
+        "current_balance": balance,
+        "earliest_balance": running_balance,
+        "anchor_date": anchor_date.strftime("%Y-%m-%d"),
+        "message": f"Set balance to ${balance:,.2f} and recalculated {updated_count} prior transactions"
+    }
+
+
+def update_forecast_balance(new_balance: float):
+    """Update the forecast starting balance"""
+    conn = get_db()
+    if not conn:
+        return
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    today = datetime.now().date().strftime("%Y-%m-%d")
+    
+    # Get current forecast entry for today
+    cur.execute("SELECT balance FROM forecast WHERE date = %s", (today,))
+    row = cur.fetchone()
+    
+    if row:
+        old_balance = float(row['balance'])
+        diff = new_balance - old_balance
+        
+        # Update all forecast entries by the difference
+        cur.execute("""
+            UPDATE forecast SET balance = balance + %s WHERE date >= %s
+        """, (diff, today))
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 @app.get("/transactions")
 async def get_transactions(
     code: str = Query(...),
