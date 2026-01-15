@@ -375,21 +375,66 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
 
 
 @app.get("/transactions")
-async def get_transactions(code: str = Query(...), limit: int = Query(default=20, le=100)):
-    """Get recent bank transactions"""
+async def get_transactions(
+    code: str = Query(...),
+    limit: int = Query(default=10, le=100),
+    offset: int = Query(default=0),
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    type: Optional[str] = Query(default=None),  # 'credit' or 'debit'
+    amount_min: Optional[float] = Query(default=None),
+    amount_max: Optional[float] = Query(default=None),
+    description: Optional[str] = Query(default=None)
+):
+    """Get bank transactions with pagination and search filters"""
     verify_code(code)
     
     conn = get_db()
     if not conn:
-        return {"transactions": [], "message": "Database not available"}
+        return {"transactions": [], "total": 0, "message": "Database not available"}
+    
+    # Build WHERE clause based on filters
+    conditions = []
+    params = []
+    
+    if date_from:
+        conditions.append("date >= %s")
+        params.append(date_from)
+    if date_to:
+        conditions.append("date <= %s")
+        params.append(date_to)
+    if type == 'credit':
+        conditions.append("(credit > 0 OR credit IS NOT NULL AND credit > 0)")
+    elif type == 'debit':
+        conditions.append("(debit > 0 OR debit IS NOT NULL AND debit > 0)")
+    if amount_min is not None:
+        conditions.append("(COALESCE(debit, 0) >= %s OR COALESCE(credit, 0) >= %s)")
+        params.extend([amount_min, amount_min])
+    if amount_max is not None:
+        conditions.append("(COALESCE(debit, 0) <= %s OR COALESCE(credit, 0) <= %s OR (debit IS NULL AND credit IS NULL))")
+        params.extend([amount_max, amount_max])
+    if description:
+        conditions.append("UPPER(description) LIKE UPPER(%s)")
+        params.append(f"%{description}%")
+    
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("""
+    
+    # Get total count
+    count_query = f"SELECT COUNT(*) as cnt FROM bank_transactions {where_clause}"
+    cur.execute(count_query, params)
+    total = cur.fetchone()['cnt']
+    
+    # Get paginated results
+    query = f"""
         SELECT date, description, debit, credit, balance, created_at
         FROM bank_transactions
+        {where_clause}
         ORDER BY date DESC, id DESC
-        LIMIT %s
-    """, (limit,))
+        LIMIT %s OFFSET %s
+    """
+    cur.execute(query, params + [limit, offset])
     
     rows = cur.fetchall()
     cur.close()
@@ -405,7 +450,13 @@ async def get_transactions(code: str = Query(...), limit: int = Query(default=20
             "balance": float(row['balance']) if row['balance'] else 0
         })
     
-    return {"transactions": transactions}
+    return {
+        "transactions": transactions,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": offset + limit < total
+    }
 
 # Projection generators
 def generate_daily_projection(days: int) -> dict:
