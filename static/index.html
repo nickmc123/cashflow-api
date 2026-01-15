@@ -588,6 +588,144 @@
             text-align: right;
         }
         
+        /* Detailed Projection Cards */
+        .proj-card {
+            background: rgba(255,255,255,0.12);
+            border-radius: 16px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        
+        .proj-card.is-low {
+            border: 2px solid rgba(239, 68, 68, 0.6);
+        }
+        
+        .proj-card.is-high {
+            border: 2px solid rgba(34, 197, 94, 0.6);
+        }
+        
+        .proj-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            background: rgba(0,0,0,0.15);
+        }
+        
+        .proj-card-date {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .proj-card-balance {
+            font-size: 20px;
+            font-weight: 700;
+            color: #fff;
+        }
+        
+        .proj-card-balance.green { color: #86efac; }
+        .proj-card-balance.yellow { color: #fde047; }
+        .proj-card-balance.red { color: #fca5a5; }
+        
+        .proj-card-body {
+            padding: 12px 16px;
+        }
+        
+        .proj-section {
+            margin-bottom: 12px;
+        }
+        
+        .proj-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .proj-section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 6px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        
+        .proj-section-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+        }
+        
+        .proj-section-label {
+            font-size: 13px;
+            color: rgba(255,255,255,0.85);
+        }
+        
+        .proj-section-value {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        .proj-section-value.credit {
+            color: #86efac;
+        }
+        
+        .proj-section-value.debit {
+            color: #fca5a5;
+        }
+        
+        .proj-section-value.special {
+            color: #fde047;
+        }
+        
+        .proj-total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0 0;
+            margin-top: 6px;
+            border-top: 1px solid rgba(255,255,255,0.15);
+        }
+        
+        .proj-total-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.7);
+        }
+        
+        .proj-total-value {
+            font-size: 14px;
+            font-weight: 700;
+        }
+        
+        .proj-range {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        
+        .proj-range-item {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .proj-range-label {
+            font-size: 10px;
+            color: rgba(255,255,255,0.5);
+            text-transform: uppercase;
+        }
+        
+        .proj-range-value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .proj-range-value.low { color: #fca5a5; }
+        .proj-range-value.high { color: #86efac; }
+        
         /* Search Toggle Button */
         .search-toggle-btn {
             background: rgba(255,255,255,0.2);
@@ -985,6 +1123,9 @@ Examples:
         }
         
         function showProjectionPage(proj) {
+            const fmt = (n) => '$' + Math.abs(n).toLocaleString();
+            const fmtK = (n) => '$' + (Math.abs(n)/1000).toFixed(0) + 'K';
+            
             const getColorClass = (balance, period) => {
                 if (period === 'monthly') {
                     if (balance < 250000) return 'red';
@@ -1004,35 +1145,171 @@ Examples:
             const summaryHtml = `
                 <div class="proj-summary-box low">
                     <div class="proj-summary-label">Low Point</div>
-                    <div class="proj-summary-value red">$${(proj.low.value/1000).toFixed(0)}K</div>
-                    <div class="proj-summary-date">${proj.low.label}</div>
+                    <div class="proj-summary-value red">${fmtK(proj.low.value)}</div>
+                    <div class="proj-summary-date">${proj.low.label || ''}</div>
                 </div>
                 <div class="proj-summary-box high">
                     <div class="proj-summary-label">High Point</div>
-                    <div class="proj-summary-value green">$${(proj.high.value/1000).toFixed(0)}K</div>
-                    <div class="proj-summary-date">${proj.high.label}</div>
+                    <div class="proj-summary-value green">${fmtK(proj.high.value)}</div>
+                    <div class="proj-summary-date">${proj.high.label || ''}</div>
                 </div>
             `;
             document.getElementById('proj-summary').innerHTML = summaryHtml;
             
-            // Build rows
-            let rowsHtml = '';
+            // Build detailed cards
+            let cardsHtml = '';
             proj.rows.forEach(row => {
                 const colorClass = getColorClass(row.balance, proj.period);
-                const isLow = row.balance === proj.low.value;
-                const isHigh = row.balance === proj.high.value;
+                const isLow = row.balance <= proj.low.value;
+                const isHigh = row.balance >= proj.high.value;
                 const highlight = isLow ? 'is-low' : (isHigh ? 'is-high' : '');
                 
-                rowsHtml += `
-                    <div class="proj-row ${highlight}">
-                        <div class="proj-indicator ${colorClass}"></div>
-                        <div class="proj-date">${row.date}</div>
-                        <div class="proj-amount">$${row.balance.toLocaleString()}</div>
-                        ${row.note ? `<div class="proj-note">${row.note}</div>` : ''}
+                // Check if we have detailed data
+                const hasDetail = row.credits && row.debits;
+                
+                if (!hasDetail) {
+                    // Simple row (fallback)
+                    cardsHtml += `
+                        <div class="proj-card ${highlight}">
+                            <div class="proj-card-header">
+                                <div class="proj-card-date">${row.date}</div>
+                                <div class="proj-card-balance ${colorClass}">${fmt(row.balance)}</div>
+                            </div>
+                            ${row.note ? `<div class="proj-card-body"><div style="color: rgba(255,255,255,0.7); font-size: 13px;">${row.note}</div></div>` : ''}
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Build detailed card
+                let bodyHtml = '';
+                
+                // Credits section
+                if (row.credits && row.credits.total > 0) {
+                    bodyHtml += `<div class="proj-section">
+                        <div class="proj-section-title">💰 Credits</div>`;
+                    if (row.credits.authnet > 0) {
+                        bodyHtml += `<div class="proj-section-row">
+                            <span class="proj-section-label">Auth.net (CC)</span>
+                            <span class="proj-section-value credit">+${fmt(row.credits.authnet)}</span>
+                        </div>`;
+                    }
+                    if (row.credits.checks > 0) {
+                        bodyHtml += `<div class="proj-section-row">
+                            <span class="proj-section-label">Check Deposits</span>
+                            <span class="proj-section-value credit">+${fmt(row.credits.checks)}</span>
+                        </div>`;
+                    }
+                    if (row.credits.wires > 0) {
+                        bodyHtml += `<div class="proj-section-row">
+                            <span class="proj-section-label">Wire Transfers</span>
+                            <span class="proj-section-value credit">+${fmt(row.credits.wires)}</span>
+                        </div>`;
+                    }
+                    bodyHtml += `<div class="proj-total-row">
+                        <span class="proj-total-label">Total Credits</span>
+                        <span class="proj-total-value credit">+${fmt(row.credits.total)}</span>
+                    </div></div>`;
+                }
+                
+                // Debits section
+                if (row.debits && row.debits.ops > 0) {
+                    bodyHtml += `<div class="proj-section">
+                        <div class="proj-section-title">📤 Normal Debits</div>
+                        <div class="proj-section-row">
+                            <span class="proj-section-label">Daily Operations</span>
+                            <span class="proj-section-value debit">-${fmt(row.debits.ops)}</span>
+                        </div>
+                    </div>`;
+                }
+                
+                // Special transactions section
+                const special = row.special;
+                const hasSpecial = special && (
+                    (Array.isArray(special) && special.length > 0) ||
+                    (!Array.isArray(special) && (special.amex > 0 || special.payroll > 0 || special.payroll_tax > 0 || special.rent > 0 || special.recurring > 0 || special.distribution > 0))
+                );
+                
+                if (hasSpecial) {
+                    bodyHtml += `<div class="proj-section">
+                        <div class="proj-section-title">⚡ Special Transactions</div>`;
+                    
+                    if (Array.isArray(special)) {
+                        // Daily format - array of transactions
+                        special.forEach(txn => {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">${txn.desc}</span>
+                                <span class="proj-section-value special">-${fmt(Math.abs(txn.amount))}</span>
+                            </div>`;
+                        });
+                    } else {
+                        // Weekly/Monthly format - aggregated object
+                        if (special.amex > 0) {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">AmEx Payment</span>
+                                <span class="proj-section-value special">-${fmt(special.amex)}</span>
+                            </div>`;
+                        }
+                        if (special.payroll > 0) {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">Payroll</span>
+                                <span class="proj-section-value special">-${fmt(special.payroll)}</span>
+                            </div>`;
+                        }
+                        if (special.payroll_tax > 0) {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">Taxes + 401K + ADP</span>
+                                <span class="proj-section-value special">-${fmt(special.payroll_tax)}</span>
+                            </div>`;
+                        }
+                        if (special.rent > 0) {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">Rent</span>
+                                <span class="proj-section-value special">-${fmt(special.rent)}</span>
+                            </div>`;
+                        }
+                        if (special.recurring > 0) {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">Monthly Recurring</span>
+                                <span class="proj-section-value special">-${fmt(special.recurring)}</span>
+                            </div>`;
+                        }
+                        if (special.distribution > 0) {
+                            bodyHtml += `<div class="proj-section-row">
+                                <span class="proj-section-label">Distribution</span>
+                                <span class="proj-section-value special">-${fmt(special.distribution)}</span>
+                            </div>`;
+                        }
+                    }
+                    bodyHtml += `</div>`;
+                }
+                
+                // Balance range for weekly/monthly
+                if (row.range && proj.period !== 'daily') {
+                    bodyHtml += `<div class="proj-range">
+                        <div class="proj-range-item">
+                            <div class="proj-range-label">Low</div>
+                            <div class="proj-range-value low">${fmtK(row.range.low)}</div>
+                        </div>
+                        <div class="proj-range-item">
+                            <div class="proj-range-label">High</div>
+                            <div class="proj-range-value high">${fmtK(row.range.high)}</div>
+                        </div>
+                    </div>`;
+                }
+                
+                cardsHtml += `
+                    <div class="proj-card ${highlight}">
+                        <div class="proj-card-header">
+                            <div class="proj-card-date">${row.date}</div>
+                            <div class="proj-card-balance ${colorClass}">${fmt(row.balance)}</div>
+                        </div>
+                        ${bodyHtml ? `<div class="proj-card-body">${bodyHtml}</div>` : ''}
                     </div>
                 `;
             });
-            document.getElementById('proj-list').innerHTML = rowsHtml;
+            
+            document.getElementById('proj-list').innerHTML = cardsHtml;
             
             // Show the page
             document.getElementById('projection-page').classList.add('active');
