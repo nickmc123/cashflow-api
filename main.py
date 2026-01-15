@@ -1214,6 +1214,24 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
     if 'profit' in q:
         return {"type": "answer", "text": f"30-day average profit: ${ROLLING_30_DAY['gross_profit']:,.0f}"}
     
+    # Payroll queries
+    if 'payroll' in q:
+        text = """💰 Payroll Structure:
+
+**Per Pay Period** (twice monthly):
+• Base payroll: ~$75,000 (spread over 3 days)
+• Payroll taxes: ~$25,000
+• 401K: ~$3,200
+• ADP fees: ~$230
+• **Total per cycle: ~$103,430**
+
+**Monthly Total: ~$206,860**
+
+**February 2026 Dates**:
+• Feb 3-5: First payroll + taxes
+• Feb 18-20: Second payroll + taxes"""
+        return {"type": "answer", "text": text}
+    
     # Payment queries
     if 'payment' in q or 'due' in q or 'coming up' in q or 'upcoming' in q:
         from datetime import date
