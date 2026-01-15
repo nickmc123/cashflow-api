@@ -465,6 +465,69 @@ async def cleanup_transactions(code: str = Query(...)):
     }
 
 
+@app.post("/recalculate-balances")
+async def recalculate_balances(code: str = Query(...)):
+    """Recalculate running balances for all transactions with zero balance"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Get the last transaction with a valid balance
+    cur.execute("""
+        SELECT id, date, balance FROM bank_transactions 
+        WHERE balance > 0 
+        ORDER BY date DESC, id DESC 
+        LIMIT 1
+    """)
+    last_good = cur.fetchone()
+    
+    if not last_good:
+        # Start from forecast if no good balances
+        running_balance = get_today_balance()
+        start_date = datetime.now().date() - timedelta(days=30)
+    else:
+        running_balance = float(last_good['balance'])
+        start_date = last_good['date']
+    
+    # Get all transactions from that date forward, ordered by date and id
+    cur.execute("""
+        SELECT id, date, debit, credit, balance FROM bank_transactions 
+        WHERE date >= %s 
+        ORDER BY date ASC, id ASC
+    """, (start_date,))
+    
+    rows = cur.fetchall()
+    updated_count = 0
+    
+    for row in rows:
+        if row['balance'] and row['balance'] > 0:
+            # Use existing balance as new starting point
+            running_balance = float(row['balance'])
+        else:
+            # Calculate new balance
+            running_balance = running_balance + float(row['credit']) - float(row['debit'])
+            # Update the row
+            cur.execute("""
+                UPDATE bank_transactions SET balance = %s WHERE id = %s
+            """, (running_balance, row['id']))
+            updated_count += 1
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "updated": updated_count,
+        "latest_balance": running_balance,
+        "message": f"Recalculated balances for {updated_count} transactions"
+    }
+
+
 @app.get("/transactions")
 async def get_transactions(
     code: str = Query(...),
