@@ -576,6 +576,35 @@ async def set_balance(
     }
 
 
+@app.post("/delete-transactions")
+async def delete_transactions(date_from: str = None, date_to: str = None, code: str = None):
+    """Delete transactions in a date range"""
+    if code != ACCESS_CODE:
+        return {"status": "error", "message": "Invalid access code"}
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database unavailable"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    if date_from and date_to:
+        cur.execute("DELETE FROM bank_transactions WHERE date >= %s AND date <= %s", (date_from, date_to))
+    elif date_from:
+        cur.execute("DELETE FROM bank_transactions WHERE date >= %s", (date_from,))
+    elif date_to:
+        cur.execute("DELETE FROM bank_transactions WHERE date <= %s", (date_to,))
+    else:
+        return {"status": "error", "message": "Provide date_from and/or date_to"}
+    
+    deleted = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "deleted": deleted, "message": f"Deleted {deleted} transactions"}
+
+
 def update_forecast_balance(new_balance: float):
     """Update the forecast starting balance"""
     conn = get_db()
