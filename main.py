@@ -428,6 +428,43 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     }
 
 
+@app.post("/cleanup-transactions")
+async def cleanup_transactions(code: str = Query(...)):
+    """Remove duplicate transactions, keeping the one with the highest balance"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor()
+    
+    # Find and remove duplicates (keep the one with highest balance)
+    cur.execute("""
+        DELETE FROM bank_transactions
+        WHERE id NOT IN (
+            SELECT MAX(id) FROM bank_transactions
+            GROUP BY date, SUBSTRING(description, 1, 50), debit, credit
+        )
+    """)
+    deleted_dups = cur.rowcount
+    
+    # Delete test entries
+    cur.execute("DELETE FROM bank_transactions WHERE description LIKE '%TEST%'")
+    deleted_test = cur.rowcount
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "deleted_duplicates": deleted_dups,
+        "deleted_test": deleted_test,
+        "message": f"Cleaned up {deleted_dups} duplicates and {deleted_test} test entries"
+    }
+
+
 @app.get("/transactions")
 async def get_transactions(
     code: str = Query(...),
