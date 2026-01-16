@@ -1204,20 +1204,25 @@ async def get_payments(code: str = Query(...)):
     upcoming.sort(key=lambda x: x["date"])
     
     # Calculate days until and balance impact
+    # Generate projection once for all payments
+    proj = generate_daily_projection(90)
+    
+    # Build a lookup by ISO date
+    balance_by_date = {}
+    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    for i, row in enumerate(proj["rows"]):
+        iso_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        balance_by_date[iso_date] = row["balance"]
+    
     result = []
     for p in upcoming:
         payment_date = datetime.strptime(p["date"], "%Y-%m-%d").date()
         days_until = (payment_date - today).days
         
-        # Get projected balance for that date
-        proj = generate_daily_projection(90)
-        balance_before = None
-        balance_after = None
-        for row in proj["entries"]:
-            if row["date"] == p["date"]:
-                balance_after = row["balance"]
-                break
-            balance_before = row["balance"]
+        # Get balance before and after from lookup
+        prev_date = (payment_date - timedelta(days=1)).strftime("%Y-%m-%d")
+        balance_before = balance_by_date.get(prev_date)
+        balance_after = balance_by_date.get(p["date"])
         
         result.append({
             "date": p["date"],
