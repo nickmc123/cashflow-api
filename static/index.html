@@ -808,6 +808,121 @@
         .proj-range-value.low { color: #fca5a5; }
         .proj-range-value.high { color: #86efac; }
         
+        /* Payment Cards */
+        .payments-list {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px 15px;
+        }
+        
+        .payment-card {
+            background: rgba(255,255,255,0.12);
+            border-radius: 16px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        
+        .payment-card.type-amex {
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .payment-card.type-payroll, .payment-card.type-payroll_tax {
+            border-left: 4px solid #8b5cf6;
+        }
+        
+        .payment-card.type-comms_execs {
+            border-left: 4px solid #f59e0b;
+        }
+        
+        .payment-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            background: rgba(0,0,0,0.15);
+        }
+        
+        .payment-card-type {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 4px;
+        }
+        
+        .payment-card-desc {
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+        }
+        
+        .payment-card-amount {
+            font-size: 22px;
+            font-weight: 700;
+            color: #fca5a5;
+        }
+        
+        .payment-card-body {
+            padding: 16px;
+        }
+        
+        .payment-card-date {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        
+        .payment-date-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .payment-days-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .payment-days-badge.urgent {
+            background: rgba(239, 68, 68, 0.5);
+        }
+        
+        .payment-days-badge.soon {
+            background: rgba(245, 158, 11, 0.5);
+        }
+        
+        .payment-balance-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .payment-balance-label {
+            font-size: 12px;
+            color: rgba(255,255,255,0.6);
+        }
+        
+        .payment-balance-value {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .payment-balance-value.before {
+            color: #86efac;
+        }
+        
+        .payment-balance-value.after {
+            color: #fde047;
+        }
+        
         /* Search Toggle Button */
         .search-toggle-btn {
             background: rgba(255,255,255,0.2);
@@ -1016,7 +1131,7 @@
             <button class="quick-btn" onclick="askQuestion('How\'s cash flow looking?')">📊 Overview</button>
             <button class="quick-btn" onclick="askQuestion('When is the low point?')">📉 Low Point</button>
             <button class="quick-btn" onclick="openProjectionModal()">📈 Cash Projection</button>
-            <button class="quick-btn" onclick="askQuestion('What payments are coming up?')">📅 Payments</button>
+            <button class="quick-btn" onclick="showPaymentsPage()">📅 Payments</button>
         </div>
         
         <div class="action-buttons">
@@ -1119,6 +1234,15 @@ Examples:
         </div>
         <div class="proj-summary" id="proj-summary"></div>
         <div class="proj-list" id="proj-list"></div>
+    </div>
+
+    <!-- Full-Screen Payments Page -->
+    <div id="payments-page" class="projection-page">
+        <div class="proj-header">
+            <button class="back-btn" onclick="closePaymentsPage()">← Back</button>
+            <h1>Upcoming Payments</h1>
+        </div>
+        <div class="payments-list" id="payments-list"></div>
     </div>
 
     <!-- Full-Screen Transactions Page -->
@@ -1433,6 +1557,93 @@ Examples:
         
         function closeProjectionPage() {
             document.getElementById('projection-page').classList.remove('active');
+        }
+        
+        // Payments page functions
+        async function showPaymentsPage() {
+            const list = document.getElementById('payments-list');
+            list.innerHTML = '<div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.7);">Loading payments...</div>';
+            document.getElementById('payments-page').classList.add('active');
+            
+            try {
+                const resp = await fetch(`/payments?code=${accessCode}`);
+                const data = await resp.json();
+                
+                if (!data.payments || data.payments.length === 0) {
+                    list.innerHTML = '<div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.7);">No upcoming payments scheduled.</div>';
+                    return;
+                }
+                
+                const fmt = n => n ? n.toLocaleString() : '0';
+                const typeLabels = {
+                    'amex': 'American Express',
+                    'payroll': 'Payroll',
+                    'payroll_tax': 'Payroll Taxes',
+                    'comms_execs': 'Comms & Execs'
+                };
+                
+                let html = '';
+                for (const p of data.payments) {
+                    const dateObj = new Date(p.date + 'T12:00:00');
+                    const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    
+                    let badgeClass = '';
+                    let badgeText = '';
+                    if (p.days_until === 0) {
+                        badgeClass = 'urgent';
+                        badgeText = 'Today';
+                    } else if (p.days_until === 1) {
+                        badgeClass = 'urgent';
+                        badgeText = 'Tomorrow';
+                    } else if (p.days_until <= 3) {
+                        badgeClass = 'urgent';
+                        badgeText = `${p.days_until} days`;
+                    } else if (p.days_until <= 7) {
+                        badgeClass = 'soon';
+                        badgeText = `${p.days_until} days`;
+                    } else {
+                        badgeText = `${p.days_until} days`;
+                    }
+                    
+                    html += `
+                        <div class="payment-card type-${p.type}">
+                            <div class="payment-card-header">
+                                <div>
+                                    <div class="payment-card-type">${typeLabels[p.type] || p.type}</div>
+                                    <div class="payment-card-desc">${p.desc}</div>
+                                </div>
+                                <div class="payment-card-amount">$${fmt(p.amount)}</div>
+                            </div>
+                            <div class="payment-card-body">
+                                <div class="payment-card-date">
+                                    <span class="payment-date-value">📅 ${dateStr}</span>
+                                    <span class="payment-days-badge ${badgeClass}">${badgeText}</span>
+                                </div>
+                                ${p.balance_before ? `
+                                <div class="payment-balance-row">
+                                    <span class="payment-balance-label">Balance Before</span>
+                                    <span class="payment-balance-value before">$${fmt(p.balance_before)}</span>
+                                </div>
+                                ` : ''}
+                                ${p.balance_after ? `
+                                <div class="payment-balance-row">
+                                    <span class="payment-balance-label">Balance After</span>
+                                    <span class="payment-balance-value after">$${fmt(p.balance_after)}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                list.innerHTML = html;
+            } catch (err) {
+                list.innerHTML = `<div style="text-align: center; padding: 40px; color: #fca5a5;">Error loading payments: ${err.message}</div>`;
+            }
+        }
+        
+        function closePaymentsPage() {
+            document.getElementById('payments-page').classList.remove('active');
         }
         
         // Transaction pagination state
