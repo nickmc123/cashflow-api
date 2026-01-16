@@ -529,7 +529,15 @@
             border-radius: 4px;
             background: rgba(50,50,50,0.9);
             color: #fff !important;
-            margin-left: 6px;
+            min-width: 62px;
+            text-align: center;
+            display: inline-block;
+        }
+        
+        .label-with-date {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .status-values {
@@ -1156,18 +1164,18 @@
                 <span id="current-balance" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
             <div class="status-row">
-                <span class="status-label">Low Point</span>
-                <div class="status-values">
+                <div class="label-with-date">
+                    <span class="status-label">Low Point</span>
                     <span id="low-point-date" class="status-date">--</span>
-                    <span id="low-point" class="status-value red"><span class="dollar">$</span><span class="num">Loading</span></span>
                 </div>
+                <span id="low-point" class="status-value red"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
             <div class="status-row">
-                <span class="status-label">High Point</span>
-                <div class="status-values">
+                <div class="label-with-date">
+                    <span class="status-label">High Point</span>
                     <span id="high-point-date" class="status-date">--</span>
-                    <span id="high-point" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
                 </div>
+                <span id="high-point" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
             <div class="status-row">
                 <span class="status-label">30-Day Profit</span>
