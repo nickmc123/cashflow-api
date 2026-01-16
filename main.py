@@ -828,14 +828,8 @@ SPECIAL_TRANSACTIONS = {
 }
 
 # Daily averages for credits
-DAILY_AUTHNET = 8500  # CC processor deposits (Paymentech, CMS, AmEx)
-DAILY_CHECK_DEPOSITS = {
-    0: 10000,  # Monday (lower)
-    1: 26000,  # Tuesday
-    2: 26000,  # Wednesday
-    3: 16000,  # Thursday
-    4: 20000,  # Friday
-}
+DAILY_AUTHNET = 15836  # CC processor deposits - weighted avg (80% last 2 weeks, 20% 90-day)
+DAILY_CHECK_DEPOSITS = 14059  # E-Deposits - weighted avg (50% last 2 weeks, 50% 60-day normalized)
 DAILY_WIRE = 2800  # ~$14K/week from CFI and FRE
 DAILY_OPS = 16500  # Daily operational debits
 MONTHLY_RENT = 8500  # Approximate monthly rent
@@ -860,7 +854,7 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
     
     # Normal credits on weekdays
     detail["credits"]["authnet"] = DAILY_AUTHNET
-    detail["credits"]["checks"] = DAILY_CHECK_DEPOSITS.get(dow, 15000)
+    detail["credits"]["checks"] = DAILY_CHECK_DEPOSITS
     detail["credits"]["wires"] = DAILY_WIRE if dow in [1, 3] else 0  # Tue/Thu
     detail["credits"]["total"] = detail["credits"]["authnet"] + detail["credits"]["checks"] + detail["credits"]["wires"]
     
@@ -1219,13 +1213,15 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         text = """💰 Payroll Structure:
 
 **Per Pay Period** (twice monthly):
-• Base payroll: ~$75,000 (spread over 3 days)
-• Payroll taxes: ~$25,000
-• 401K: ~$3,200
+• 5-series checks: ~$60,000
+• ADP Tax: ~$22,000
+• ADP 401K: ~$3,200
 • ADP fees: ~$230
-• **Total per cycle: ~$103,430**
+• **Total per cycle: ~$85,000**
 
-**Monthly Total: ~$206,860**
+**Monthly Total: ~$170,000**
+
+**Blue Shield** (BOM, separate): ~$12-19K
 
 **February 2026 Dates**:
 • Feb 3-5: First payroll + taxes
