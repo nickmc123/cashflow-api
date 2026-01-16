@@ -135,20 +135,21 @@ DEFAULT_FORECAST = {
     "2026-01-29": {"balance": 290000, "note": "Pre-AmEx peak"},
     "2026-01-30": {"balance": 224000, "note": "After $130K AmEx payment"},
     "2026-01-31": {"balance": 230000, "note": "January close"},
-    "2026-02-02": {"balance": 245000, "note": "February starts"},
-    "2026-02-03": {"balance": 220000, "note": "Payroll starts"},
-    "2026-02-04": {"balance": 200000, "note": "Payroll continues"},
-    "2026-02-05": {"balance": 175000, "note": "Payroll + taxes"},
-    "2026-02-06": {"balance": 190000, "note": "Recovery"},
-    "2026-02-09": {"balance": 220000, "note": "Week buildup"},
-    "2026-02-10": {"balance": 245000, "note": "Strong week"},
-    "2026-02-11": {"balance": 280000, "note": "Approaching peak"},
+    "2026-02-02": {"balance": 220000, "note": "ADP Tax + 401K + Fees"},
+    "2026-02-03": {"balance": 160000, "note": "Payroll checks"},
+    "2026-02-04": {"balance": 175000, "note": "Recovery"},
+    "2026-02-05": {"balance": 190000, "note": "Recovery continues"},
+    "2026-02-06": {"balance": 205000, "note": "Week buildup"},
+    "2026-02-09": {"balance": 235000, "note": "Week buildup"},
+    "2026-02-10": {"balance": 265000, "note": "Strong week"},
+    "2026-02-11": {"balance": 300000, "note": "Approaching peak"},
     "2026-02-12": {"balance": 369000, "note": "PEAK - Best for distribution"},
     "2026-02-13": {"balance": 269000, "note": "After $100K AmEx payment"},
-    "2026-02-17": {"balance": 290000, "note": "Pre-payroll"},
-    "2026-02-18": {"balance": 265000, "note": "Payroll starts"},
-    "2026-02-19": {"balance": 245000, "note": "Payroll continues"},
-    "2026-02-20": {"balance": 220000, "note": "Payroll + taxes"},
+    "2026-02-16": {"balance": 260000, "note": "ADP Tax + 401K + Fees"},
+    "2026-02-17": {"balance": 200000, "note": "Payroll checks"},
+    "2026-02-18": {"balance": 215000, "note": "Recovery"},
+    "2026-02-19": {"balance": 230000, "note": "Recovery continues"},
+    "2026-02-20": {"balance": 245000, "note": "Week buildup"},
     "2026-02-24": {"balance": 341000, "note": "End of forecast period"}
 }
 
@@ -818,13 +819,12 @@ SPECIAL_TRANSACTIONS = {
     "2026-01-16": [{"type": "amex", "amount": -106000, "desc": "AmEx Payment"}],
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
     "2026-02-13": [{"type": "amex", "amount": -100000, "desc": "AmEx Payment"}],
-    # Payroll (Feb 3 and Feb 18)
-    "2026-02-03": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 1"}],
-    "2026-02-04": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 2"}],
-    "2026-02-05": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 3"}, {"type": "payroll_tax", "amount": -28500, "desc": "Taxes + 401K + ADP"}],
-    "2026-02-18": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 1"}],
-    "2026-02-19": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 2"}],
-    "2026-02-20": [{"type": "payroll", "amount": -25000, "desc": "Payroll Day 3"}, {"type": "payroll_tax", "amount": -28500, "desc": "Taxes + 401K + ADP"}],
+    # Payroll cycle 1 (Feb 1 is Sunday)
+    "2026-02-02": [{"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"}],  # 1st business day after 1st
+    "2026-02-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # Next day
+    # Payroll cycle 2 (Feb 15 is Sunday)
+    "2026-02-16": [{"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"}],  # 1st business day after 15th
+    "2026-02-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # Next day
 }
 
 # Daily averages for credits
@@ -1304,8 +1304,10 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
 **Blue Shield** (BOM, separate): ~$12-19K
 
 **February 2026 Dates**:
-• Feb 3-5: First payroll + taxes
-• Feb 18-20: Second payroll + taxes"""
+• Feb 2: ADP Tax + 401K + Fees (~$25K)
+• Feb 3: Payroll Checks (~$60K)
+• Feb 16: ADP Tax + 401K + Fees (~$25K)
+• Feb 17: Payroll Checks (~$60K)"""
         return {"type": "answer", "text": text}
     
     # Payment queries
@@ -1315,11 +1317,11 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         payments = [
             {"date": "2026-01-16", "desc": "AmEx Payment", "amount": 106000},
             {"date": "2026-01-31", "desc": "AmEx Payment", "amount": 130000},
-            {"date": "2026-02-03", "desc": "Payroll", "amount": 75000},
-            {"date": "2026-02-05", "desc": "Payroll Taxes + 401K", "amount": 28500},
+            {"date": "2026-02-02", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
+            {"date": "2026-02-03", "desc": "Payroll Checks", "amount": 60000},
             {"date": "2026-02-13", "desc": "AmEx Payment", "amount": 100000},
-            {"date": "2026-02-18", "desc": "Payroll", "amount": 75000},
-            {"date": "2026-02-20", "desc": "Payroll Taxes + 401K", "amount": 28500},
+            {"date": "2026-02-16", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
+            {"date": "2026-02-17", "desc": "Payroll Checks", "amount": 60000},
         ]
         upcoming = [p for p in payments if p["date"] >= today.isoformat()]
         if not upcoming:
