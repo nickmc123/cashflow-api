@@ -1169,6 +1169,68 @@ async def get_balance(date: str, code: str = Query(...)):
         return {"date": date, "balance": forecast[date]["balance"], "note": forecast[date].get("note", "")}
     raise HTTPException(status_code=404, detail=f"No forecast for {date}")
 
+@app.get("/payments")
+async def get_payments(code: str = Query(...)):
+    """Get upcoming payments with balance impact"""
+    verify_code(code)
+    from datetime import date
+    today = date.today()
+    
+    # Get all scheduled payments from SPECIAL_TRANSACTIONS
+    payments = []
+    for date_str, txns in SPECIAL_TRANSACTIONS.items():
+        for txn in txns:
+            if txn["type"] in ["amex", "payroll", "payroll_tax"]:
+                payments.append({
+                    "date": date_str,
+                    "type": txn["type"],
+                    "desc": txn["desc"],
+                    "amount": abs(txn["amount"])
+                })
+    
+    # Add Comms & Execs for upcoming months
+    for month in range(1, 4):  # Jan, Feb, Mar
+        year = 2026
+        first_str = f"{year}-{month:02d}-01"
+        fifteenth_str = f"{year}-{month:02d}-15"
+        
+        if first_str >= today.isoformat() and first_str not in [p["date"] for p in payments]:
+            payments.append({"date": first_str, "type": "comms_execs", "desc": "Comms & Execs", "amount": BOM_CHECKS})
+        if fifteenth_str >= today.isoformat() and fifteenth_str not in [p["date"] for p in payments]:
+            payments.append({"date": fifteenth_str, "type": "comms_execs", "desc": "Comms & Execs", "amount": MID_CHECKS})
+    
+    # Filter to upcoming only and sort
+    upcoming = [p for p in payments if p["date"] >= today.isoformat()]
+    upcoming.sort(key=lambda x: x["date"])
+    
+    # Calculate days until and balance impact
+    result = []
+    for p in upcoming:
+        payment_date = datetime.strptime(p["date"], "%Y-%m-%d").date()
+        days_until = (payment_date - today).days
+        
+        # Get projected balance for that date
+        proj = generate_daily_projection(90)
+        balance_before = None
+        balance_after = None
+        for row in proj["entries"]:
+            if row["date"] == p["date"]:
+                balance_after = row["balance"]
+                break
+            balance_before = row["balance"]
+        
+        result.append({
+            "date": p["date"],
+            "type": p["type"],
+            "desc": p["desc"],
+            "amount": p["amount"],
+            "days_until": days_until,
+            "balance_before": balance_before,
+            "balance_after": balance_after
+        })
+    
+    return {"payments": result}
+
 @app.get("/ask")
 async def ask_question(code: str = Query(...), question: str = Query(...)):
     verify_code(code)
