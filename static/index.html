@@ -609,6 +609,17 @@
             padding: 0 10px;
         }
         
+        .amount-pill {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 3px 6px;
+            border-radius: 4px;
+            color: #fff !important;
+        }
+        .amount-credit { background: rgba(40,167,69,0.9); }
+        .amount-debit { background: rgba(220,53,69,0.9); }
+        
         .proj-row {
             display: flex;
             align-items: center;
@@ -1509,7 +1520,7 @@ Examples:
                                 <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:1px;">Bal: ${balanceStr}</div>
                             </div>
                             <div style="min-width:75px;text-align:right;flex-shrink:0;">
-                                <span style="background:${isDebit ? 'rgba(220,53,69,0.9)' : 'rgba(40,167,69,0.9)'};color:#fff;font-size:12px;font-weight:700;padding:3px 6px;border-radius:4px;">${isDebit ? '-' : '+'}${amountStr}</span>
+                                <span class="amount-pill ${isDebit ? 'amount-debit' : 'amount-credit'}">${isDebit ? '-' : '+'}${amountStr}</span>
                             </div>
                         </div>`;
                 }
