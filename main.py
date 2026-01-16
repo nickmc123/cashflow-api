@@ -922,31 +922,28 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
         "net": 0
     }
     
-    if is_weekend:
-        return detail
+    # Normal credits/debits only on weekdays
+    if not is_weekend:
+        detail["credits"]["authnet"] = DAILY_AUTHNET
+        detail["credits"]["checks"] = DAILY_CHECK_DEPOSITS
+        detail["credits"]["wires"] = DAILY_WIRE if dow in [1, 3] else 0  # Tue/Thu
+        detail["credits"]["total"] = detail["credits"]["authnet"] + detail["credits"]["checks"] + detail["credits"]["wires"]
+        
+        detail["debits"]["ops"] = DAILY_OPS
+        detail["debits"]["total"] = DAILY_OPS
+        
+        # Even-thousands checks on 1st and 15th (only if should be included)
+        day_of_month = date.day
+        if day_of_month == 1:
+            if should_include_special_transaction('comms_execs', -BOM_CHECKS, date_str):
+                detail["special"].append({"type": "comms_execs", "amount": -BOM_CHECKS, "desc": "Comms & Execs"})
+                detail["debits"]["total"] += BOM_CHECKS
+        elif day_of_month == 15:
+            if should_include_special_transaction('comms_execs', -MID_CHECKS, date_str):
+                detail["special"].append({"type": "comms_execs", "amount": -MID_CHECKS, "desc": "Comms & Execs"})
+                detail["debits"]["total"] += MID_CHECKS
     
-    # Normal credits on weekdays
-    detail["credits"]["authnet"] = DAILY_AUTHNET
-    detail["credits"]["checks"] = DAILY_CHECK_DEPOSITS
-    detail["credits"]["wires"] = DAILY_WIRE if dow in [1, 3] else 0  # Tue/Thu
-    detail["credits"]["total"] = detail["credits"]["authnet"] + detail["credits"]["checks"] + detail["credits"]["wires"]
-    
-    # Normal debits on weekdays
-    detail["debits"]["ops"] = DAILY_OPS
-    detail["debits"]["total"] = DAILY_OPS
-    
-    # Even-thousands checks on 1st and 15th (only if should be included)
-    day_of_month = date.day
-    if day_of_month == 1:
-        if should_include_special_transaction('comms_execs', -BOM_CHECKS, date_str):
-            detail["special"].append({"type": "comms_execs", "amount": -BOM_CHECKS, "desc": "Comms & Execs"})
-            detail["debits"]["total"] += BOM_CHECKS
-    elif day_of_month == 15:
-        if should_include_special_transaction('comms_execs', -MID_CHECKS, date_str):
-            detail["special"].append({"type": "comms_execs", "amount": -MID_CHECKS, "desc": "Comms & Execs"})
-            detail["debits"]["total"] += MID_CHECKS
-    
-    # Add special transactions (only if should be included based on bank confirmation)
+    # Add special transactions (AmEx, payroll, etc.) on ANY day including weekends
     if date_str in SPECIAL_TRANSACTIONS:
         for txn in SPECIAL_TRANSACTIONS[date_str]:
             if should_include_special_transaction(txn["type"], txn["amount"], date_str):
