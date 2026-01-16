@@ -964,6 +964,7 @@ def generate_daily_projection(days: int) -> dict:
     start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
     
+    # Get the starting balance from forecast (this is the user's set balance)
     if today_str in forecast:
         start_balance = forecast[today_str]["balance"]
     else:
@@ -980,17 +981,21 @@ def generate_daily_projection(days: int) -> dict:
         
         detail = get_daily_detail(date, forecast)
         
-        note = ""
-        if date_str in forecast:
-            balance = forecast[date_str]["balance"]
-            note = forecast[date_str].get("note", "")
+        # Get note from forecast if available
+        note = forecast.get(date_str, {}).get("note", "")
+        
+        # For day 0 (today), the stored balance is start-of-day, apply today's net to get end-of-day
+        # For all other days, calculate from previous day's ending balance
+        if i == 0:
+            # Apply today's full net (includes special transactions like AmEx)
+            balance = int(start_balance + detail["net"])
         else:
             balance = int(balance + detail["net"])
         
         if balance < low_bal:
-            low_bal, low_date, low_note = balance, date.strftime("%b %d"), note
+            low_bal, low_date, low_note = balance, date.strftime("%Y-%m-%d"), note
         if balance > high_bal:
-            high_bal, high_date, high_note = balance, date.strftime("%b %d"), note
+            high_bal, high_date, high_note = balance, date.strftime("%Y-%m-%d"), note
         
         rows.append({
             "date": date.strftime("%a %b %d"),
@@ -1181,33 +1186,28 @@ def generate_monthly_projection(months: int) -> dict:
 @app.get("/summary")
 async def get_summary(code: str = Query(...)):
     verify_code(code)
-    forecast = get_forecast_from_db()
-    sorted_dates = sorted(forecast.keys())
     
+    # Use the projection to get accurate values (includes today's transactions)
+    proj = generate_daily_projection(60)
     today = datetime.now().strftime("%Y-%m-%d")
-    current_balance = get_today_balance()
     
-    low_point = min(forecast.values(), key=lambda x: x["balance"])
-    low_date = [k for k, v in forecast.items() if v["balance"] == low_point["balance"]][0]
-    
-    high_point = max(forecast.values(), key=lambda x: x["balance"])
-    high_date = [k for k, v in forecast.items() if v["balance"] == high_point["balance"]][0]
+    # Today's balance is end-of-day (first row in projection)
+    current_balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
     
     gross_profit = ROLLING_30_DAY['gross_profit']
-    net_profit = gross_profit - MONTHLY_PAYROLL
     
     return {
         "current_balance": current_balance,
         "as_of": today,
         "low_point": {
-            "balance": low_point["balance"],
-            "date": low_date,
-            "note": low_point.get("note", "")
+            "balance": proj["low"]["value"],
+            "date": proj["low"]["label"],
+            "note": proj["low"].get("note", "")
         },
         "high_point": {
-            "balance": high_point["balance"],
-            "date": high_date,
-            "note": high_point.get("note", "")
+            "balance": proj["high"]["value"],
+            "date": proj["high"]["label"],
+            "note": proj["high"].get("note", "")
         },
         "profit_30day": gross_profit
     }
