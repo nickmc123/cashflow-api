@@ -1439,14 +1439,14 @@ Examples:
     </div>
 
     <!-- Chat Page -->
-    <div id="chat-page" class="projection-page">
+    <div id="chat-page" class="projection-page" style="display: none; flex-direction: column;">
         <div class="proj-header">
             <button class="back-btn" onclick="closeChatPage()">← Done</button>
             <h1>Ask a Question</h1>
             <div style="width: 40px;"></div>
         </div>
         <div id="chat" class="chat-container" style="padding: 15px; flex: 1; overflow-y: auto;"></div>
-        <div class="chat-input-area">
+        <div class="chat-input-area" style="position: fixed; bottom: 0; left: 0; right: 0;">
             <input type="text" id="question-input" placeholder="Ask me about your finances..." onkeypress="handleKeyPress(event)">
             <button class="chat-send-btn" onclick="sendQuestion()">➤</button>
         </div>
@@ -1951,12 +1951,12 @@ Examples:
         }
         
         function showChatPage() {
-            document.getElementById('chat-page').classList.add('active');
+            document.getElementById('chat-page').style.display = 'flex';
             document.getElementById('question-input').focus();
         }
         
         function closeChatPage() {
-            document.getElementById('chat-page').classList.remove('active');
+            document.getElementById('chat-page').style.display = 'none';
         }
         
         function toggleSelectAll() {
