@@ -506,16 +506,36 @@
         
         .status-value {
             font-weight: 700;
-            font-size: 14px;
-            padding: 4px 10px;
-            border-radius: 6px;
-            border: 2px solid;
-            display: inline-block;
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-flex;
+            justify-content: space-between;
+            min-width: 110px;
+            color: #fff !important;
         }
         
-        .status-value.green { color: #166534; border-color: #166534; background: rgba(22,101,52,0.1); }
-        .status-value.red { color: #8b0000; border-color: #8b0000; background: rgba(139,0,0,0.1); }
-        .status-value.neutral { color: #111; border-color: #111; background: rgba(0,0,0,0.05); }
+        .status-value .dollar { margin-right: 8px; }
+        .status-value .num { text-align: right; }
+        
+        .status-value.green { background: rgba(40,167,69,0.9); }
+        .status-value.red { background: #8b0000; }
+        .status-value.neutral { background: rgba(50,50,50,0.9); }
+        
+        .status-date {
+            font-weight: 700;
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: rgba(50,50,50,0.9);
+            color: #fff !important;
+            margin-left: 6px;
+        }
+        
+        .status-values {
+            display: flex;
+            align-items: center;
+        }
         
         /* Full-screen Projection Page */
         .projection-page {
@@ -615,13 +635,17 @@
         }
         
         .amount-pill {
-            display: inline-block;
+            display: inline-flex;
+            justify-content: space-between;
+            min-width: 95px;
             font-size: 12px;
             font-weight: 700;
             padding: 3px 6px;
             border-radius: 4px;
             color: #fff !important;
         }
+        .amount-pill .dollar { margin-right: 6px; }
+        .amount-pill .num { text-align: right; }
         .amount-credit { background: rgba(40,167,69,0.9); }
         .amount-debit { background: #8b0000; }
         
@@ -863,14 +887,18 @@
         }
         
         .payment-card-amount {
-            display: inline-block;
+            display: inline-flex;
+            justify-content: space-between;
+            min-width: 130px;
             font-size: 18px;
             font-weight: 700;
             padding: 6px 12px;
             border-radius: 6px;
             background: #8b0000;
-            color: #111;
+            color: #fff;
         }
+        .payment-card-amount .dollar { margin-right: 10px; }
+        .payment-card-amount .num { text-align: right; }
         
         .payment-card-body {
             padding: 16px;
@@ -921,13 +949,17 @@
         }
         
         .payment-balance-value {
-            display: inline-block;
+            display: inline-flex;
+            justify-content: space-between;
+            min-width: 105px;
             font-size: 14px;
             font-weight: 700;
             padding: 4px 10px;
             border-radius: 4px;
-            color: #111;
+            color: #fff;
         }
+        .payment-balance-value .dollar { margin-right: 8px; }
+        .payment-balance-value .num { text-align: right; }
         
         .payment-balance-value.before {
             background: rgba(40,167,69,0.9);
@@ -1121,23 +1153,29 @@
         <div id="status-card" class="status-card">
             <div class="status-row">
                 <span class="status-label">Current Balance</span>
-                <span id="current-balance" class="status-value green">Loading...</span>
+                <span id="current-balance" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
             <div class="status-row">
                 <span class="status-label">Low Point</span>
-                <span id="low-point" class="status-value red">Loading...</span>
+                <div class="status-values">
+                    <span id="low-point" class="status-value red"><span class="dollar">$</span><span class="num">Loading</span></span>
+                    <span id="low-point-date" class="status-date">--</span>
+                </div>
             </div>
             <div class="status-row">
                 <span class="status-label">High Point</span>
-                <span id="high-point" class="status-value green">Loading...</span>
+                <div class="status-values">
+                    <span id="high-point" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
+                    <span id="high-point-date" class="status-date">--</span>
+                </div>
             </div>
             <div class="status-row">
                 <span class="status-label">30-Day Profit</span>
-                <span id="profit" class="status-value green">Loading...</span>
+                <span id="profit" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
             <div class="status-row">
                 <span class="status-label">Status</span>
-                <span id="status" class="status-value green">Loading...</span>
+                <span id="status" class="status-value neutral">Loading</span>
             </div>
         </div>
         
@@ -1346,27 +1384,52 @@ Examples:
         }
         
         // Load initial status
+        function formatShortDate(dateStr) {
+            // Convert 2026-01-15 or Jan 15, 2026 to 1/15/26
+            let d;
+            if (dateStr.includes('-')) {
+                d = new Date(dateStr + 'T12:00:00');
+            } else {
+                d = new Date(dateStr);
+            }
+            return (d.getMonth()+1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(-2);
+        }
+        
+        function setStatusPill(el, amount) {
+            const numEl = el.querySelector('.num');
+            if (numEl) {
+                numEl.textContent = Math.abs(amount).toLocaleString();
+            } else {
+                el.innerHTML = '<span class="dollar">$</span><span class="num">' + Math.abs(amount).toLocaleString() + '</span>';
+            }
+        }
+        
         async function loadStatus() {
             try {
                 const response = await fetch(`${API_BASE}/summary?code=${CODE}`);
                 const data = await response.json();
                 
                 // Handle new structured JSON format
-                document.getElementById('current-balance').textContent = formatCurrency(data.current_balance);
+                setStatusPill(document.getElementById('current-balance'), data.current_balance);
                 
                 if (data.low_point && typeof data.low_point === 'object') {
-                    document.getElementById('low-point').textContent = formatCurrency(data.low_point.balance) + ' ' + data.low_point.date;
+                    setStatusPill(document.getElementById('low-point'), data.low_point.balance);
+                    document.getElementById('low-point-date').textContent = formatShortDate(data.low_point.date);
                 } else {
-                    document.getElementById('low-point').textContent = data.low_point || 'N/A';
+                    setStatusPill(document.getElementById('low-point'), 0);
+                    document.getElementById('low-point-date').textContent = '--';
                 }
                 
                 if (data.high_point && typeof data.high_point === 'object') {
-                    document.getElementById('high-point').textContent = formatCurrency(data.high_point.balance) + ' ' + data.high_point.date;
+                    setStatusPill(document.getElementById('high-point'), data.high_point.balance);
+                    document.getElementById('high-point-date').textContent = formatShortDate(data.high_point.date);
                 } else {
-                    document.getElementById('high-point').textContent = data.high_point || 'N/A';
+                    setStatusPill(document.getElementById('high-point'), 0);
+                    document.getElementById('high-point-date').textContent = '--';
                 }
                 
-                document.getElementById('profit').textContent = formatCurrency(data.profit_30day) + '/mo';
+                const profitEl = document.getElementById('profit');
+                profitEl.innerHTML = '<span class="dollar">$</span><span class="num">' + Math.abs(data.profit_30day).toLocaleString() + '/mo</span>';
                 
                 // Status based on current balance
                 const status = data.current_balance < 200000 ? 'Tight' : (data.current_balance < 250000 ? 'OK' : 'Healthy');
@@ -1626,7 +1689,7 @@ Examples:
                                     <div class="payment-card-type">${typeLabels[p.type] || p.type}</div>
                                     <div class="payment-card-desc">${p.desc}</div>
                                 </div>
-                                <div class="payment-card-amount">$${fmt(p.amount)}</div>
+                                <div class="payment-card-amount"><span class="dollar">$</span><span class="num">${fmt(p.amount)}</span></div>
                             </div>
                             <div class="payment-card-body">
                                 <div class="payment-card-date">
@@ -1636,13 +1699,13 @@ Examples:
                                 ${p.balance_before ? `
                                 <div class="payment-balance-row">
                                     <span class="payment-balance-label">Balance Before</span>
-                                    <span class="payment-balance-value before">$${fmt(p.balance_before)}</span>
+                                    <span class="payment-balance-value before"><span class="dollar">$</span><span class="num">${fmt(p.balance_before)}</span></span>
                                 </div>
                                 ` : ''}
                                 ${p.balance_after ? `
                                 <div class="payment-balance-row">
                                     <span class="payment-balance-label">Balance After</span>
-                                    <span class="payment-balance-value after">$${fmt(p.balance_after)}</span>
+                                    <span class="payment-balance-value after"><span class="dollar">$</span><span class="num">${fmt(p.balance_after)}</span></span>
                                 </div>
                                 ` : ''}
                             </div>
@@ -1744,8 +1807,8 @@ Examples:
                                 <div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,0.85);">${tx.description || '-'}</div>
                                 <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:1px;">Bal: ${balanceStr}</div>
                             </div>
-                            <div style="min-width:75px;text-align:right;flex-shrink:0;">
-                                <span class="amount-pill ${isDebit ? 'amount-debit' : 'amount-credit'}">${isDebit ? '-' : '+'}${amountStr}</span>
+                            <div style="min-width:100px;text-align:right;flex-shrink:0;">
+                                <span class="amount-pill ${isDebit ? 'amount-debit' : 'amount-credit'}"><span class="dollar">${isDebit ? '-$' : '+$'}</span><span class="num">${amountStr}</span></span>
                             </div>
                         </div>`;
                 }
