@@ -831,9 +831,14 @@ SPECIAL_TRANSACTIONS = {
 DAILY_AUTHNET = 15836  # CC processor deposits - weighted avg (80% last 2 weeks, 20% 90-day)
 DAILY_CHECK_DEPOSITS = 14059  # E-Deposits - weighted avg (50% last 2 weeks, 50% 60-day normalized)
 DAILY_WIRE = 1907  # ~$9.5K/week from CFI and FRE - weighted avg (50% last 2 weeks, 50% 60-day normalized)
-DAILY_OPS = 16500  # Daily operational debits
+DAILY_OPS = 17480  # Daily operational debits - weighted avg (50% last 2 weeks, 50% 60-day normalized)
 MONTHLY_RENT = 8500  # Approximate monthly rent
 MONTHLY_RECURRING = 5000  # Insurance, utilities, etc.
+
+# Even-thousands checks (excluded from daily ops)
+BOM_CHECKS = 51000  # 1st of month: $6K + $15K + $30K
+MID_CHECKS = 46000  # 15th of month: $25K + $6K + $15K
+WEEKLY_NEOPOST = 1000  # Postage machine advance
 
 def get_daily_detail(date: datetime, forecast: dict) -> dict:
     """Get detailed breakdown for a single day"""
@@ -861,6 +866,20 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
     # Normal debits on weekdays
     detail["debits"]["ops"] = DAILY_OPS
     detail["debits"]["total"] = DAILY_OPS
+    
+    # Even-thousands checks on 1st and 15th
+    day_of_month = date.day
+    if day_of_month == 1:
+        detail["special"].append({"type": "checks", "amount": -BOM_CHECKS, "desc": "BOM Checks ($6K+$15K+$30K)"})
+        detail["debits"]["total"] += BOM_CHECKS
+    elif day_of_month == 15:
+        detail["special"].append({"type": "checks", "amount": -MID_CHECKS, "desc": "Mid-Month Checks ($25K+$6K+$15K)"})
+        detail["debits"]["total"] += MID_CHECKS
+    
+    # Neopost (postage) weekly on Thursdays
+    if dow == 3:  # Thursday
+        detail["special"].append({"type": "neopost", "amount": -WEEKLY_NEOPOST, "desc": "Neopost Postage"})
+        detail["debits"]["total"] += WEEKLY_NEOPOST
     
     # Add special transactions
     if date_str in SPECIAL_TRANSACTIONS:
