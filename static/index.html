@@ -1643,7 +1643,7 @@ Examples:
             document.getElementById('payments-page').classList.add('active');
             
             try {
-                const resp = await fetch(`/payments?code=${accessCode}`);
+                const resp = await fetch(`${API_BASE}/payments?code=${CODE}`);
                 const data = await resp.json();
                 
                 if (!data.payments || data.payments.length === 0) {
