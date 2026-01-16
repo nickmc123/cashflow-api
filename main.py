@@ -839,6 +839,75 @@ MONTHLY_RECURRING = 5000  # Insurance, utilities, etc.
 BOM_CHECKS = 51000  # 1st of month: $6K + $15K + $30K
 MID_CHECKS = 46000  # 15th of month: $25K + $6K + $15K
 
+def should_include_special_transaction(txn_type: str, amount: int, scheduled_date: str) -> bool:
+    """Determine if a scheduled special transaction should be included in projections.
+    
+    Rules:
+    1. If scheduled date is in the future: include it
+    2. If scheduled date is today or in the past:
+       - Check if it's been confirmed in bank data -> exclude if found
+       - If more than 2 days past and not confirmed -> exclude (assume didn't happen)
+       - If within 2 days and not confirmed -> include (still waiting for it)
+    """
+    from datetime import datetime, timedelta
+    
+    today = datetime.now().date()
+    scheduled = datetime.strptime(scheduled_date, "%Y-%m-%d").date()
+    days_since_scheduled = (today - scheduled).days
+    
+    # Future transactions: always include
+    if days_since_scheduled < 0:
+        return True
+    
+    # Check if confirmed in bank data
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Look for matching debit within 3 days of scheduled date
+        # Match by approximate amount (within 10%)
+        abs_amount = abs(amount)
+        min_amount = abs_amount * 0.9
+        max_amount = abs_amount * 1.1
+        
+        # Search pattern based on transaction type
+        if txn_type == 'amex':
+            search_pattern = '%AMEX%'
+        elif txn_type in ('payroll', 'payroll_tax'):
+            search_pattern = '%ADP%'  # ADP handles payroll
+        elif txn_type == 'comms_execs':
+            # These are individual checks, harder to match - check by amount range
+            search_pattern = '%'
+        else:
+            search_pattern = '%'
+        
+        cur.execute("""
+            SELECT id FROM bank_transactions 
+            WHERE date >= %s::date - interval '1 day'
+            AND date <= %s::date + interval '3 days'
+            AND debit_amount >= %s AND debit_amount <= %s
+            AND UPPER(description) LIKE %s
+            LIMIT 1
+        """, (scheduled_date, scheduled_date, min_amount, max_amount, search_pattern))
+        
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        # If found in bank data, exclude from projection
+        if result is not None:
+            return False
+            
+    except Exception as e:
+        print(f"Error checking confirmed transaction: {e}")
+    
+    # If more than 2 days past and not confirmed, exclude it
+    if days_since_scheduled > 2:
+        return False
+    
+    # Within 2 days window and not yet confirmed - include it
+    return True
+
 def get_daily_detail(date: datetime, forecast: dict) -> dict:
     """Get detailed breakdown for a single day"""
     date_str = date.strftime("%Y-%m-%d")
@@ -866,21 +935,24 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
     detail["debits"]["ops"] = DAILY_OPS
     detail["debits"]["total"] = DAILY_OPS
     
-    # Even-thousands checks on 1st and 15th
+    # Even-thousands checks on 1st and 15th (only if should be included)
     day_of_month = date.day
     if day_of_month == 1:
-        detail["special"].append({"type": "comms_execs", "amount": -BOM_CHECKS, "desc": "Comms & Execs"})
-        detail["debits"]["total"] += BOM_CHECKS
+        if should_include_special_transaction('comms_execs', -BOM_CHECKS, date_str):
+            detail["special"].append({"type": "comms_execs", "amount": -BOM_CHECKS, "desc": "Comms & Execs"})
+            detail["debits"]["total"] += BOM_CHECKS
     elif day_of_month == 15:
-        detail["special"].append({"type": "comms_execs", "amount": -MID_CHECKS, "desc": "Comms & Execs"})
-        detail["debits"]["total"] += MID_CHECKS
+        if should_include_special_transaction('comms_execs', -MID_CHECKS, date_str):
+            detail["special"].append({"type": "comms_execs", "amount": -MID_CHECKS, "desc": "Comms & Execs"})
+            detail["debits"]["total"] += MID_CHECKS
     
-    # Add special transactions
+    # Add special transactions (only if should be included based on bank confirmation)
     if date_str in SPECIAL_TRANSACTIONS:
         for txn in SPECIAL_TRANSACTIONS[date_str]:
-            detail["special"].append(txn)
-            if txn["amount"] < 0:
-                detail["debits"]["total"] += abs(txn["amount"])
+            if should_include_special_transaction(txn["type"], txn["amount"], date_str):
+                detail["special"].append(txn)
+                if txn["amount"] < 0:
+                    detail["debits"]["total"] += abs(txn["amount"])
     
     # Calculate net
     detail["net"] = detail["credits"]["total"] - detail["debits"]["total"]
