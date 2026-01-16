@@ -170,12 +170,13 @@
         }
         
         .quick-btn {
-            background: rgba(255,255,255,0.25);
-            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.85);
+            border: 1px solid rgba(200,200,200,0.5);
             color: #111;
             padding: 12px 15px;
             border-radius: 12px;
             font-size: 13px;
+            font-weight: 700;
             cursor: pointer;
             transition: all 0.2s;
         }
@@ -243,12 +244,13 @@
         
         .action-btn {
             flex: 1;
-            background: rgba(255,255,255,0.2);
-            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.85);
+            border: 1px solid rgba(200,200,200,0.5);
             color: #111;
             padding: 12px;
             border-radius: 12px;
             font-size: 13px;
+            font-weight: 700;
             cursor: pointer;
             transition: all 0.2s;
         }
@@ -1197,14 +1199,6 @@
             <button class="action-btn" onclick="showTransactions()">📄 Recent Transactions</button>
         </div>
         
-        <div id="chat" class="chat-container"></div>
-    </div>
-    
-    <div class="input-area">
-        <div class="input-row">
-            <input type="text" id="question-input" placeholder="Ask a question..." onkeypress="handleKeyPress(event)">
-            <button class="send-btn" onclick="sendQuestion()">➤</button>
-        </div>
     </div>
     
     <!-- Paste Data Modal -->
