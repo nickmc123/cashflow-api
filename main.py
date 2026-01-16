@@ -870,15 +870,15 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
     # Even-thousands checks on 1st and 15th
     day_of_month = date.day
     if day_of_month == 1:
-        detail["special"].append({"type": "checks", "amount": -BOM_CHECKS, "desc": "BOM Checks ($6K+$15K+$30K)"})
+        detail["special"].append({"type": "comms", "amount": -BOM_CHECKS, "desc": "Comms ($6K+$15K+$30K)"})
         detail["debits"]["total"] += BOM_CHECKS
     elif day_of_month == 15:
-        detail["special"].append({"type": "checks", "amount": -MID_CHECKS, "desc": "Mid-Month Checks ($25K+$6K+$15K)"})
+        detail["special"].append({"type": "comms", "amount": -MID_CHECKS, "desc": "Comms ($25K+$6K+$15K)"})
         detail["debits"]["total"] += MID_CHECKS
     
     # Neopost (postage) weekly on Thursdays
     if dow == 3:  # Thursday
-        detail["special"].append({"type": "neopost", "amount": -WEEKLY_NEOPOST, "desc": "Neopost Postage"})
+        detail["special"].append({"type": "exec", "amount": -WEEKLY_NEOPOST, "desc": "Exec"})
         detail["debits"]["total"] += WEEKLY_NEOPOST
     
     # Add special transactions
