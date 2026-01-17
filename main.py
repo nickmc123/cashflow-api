@@ -835,13 +835,35 @@ SPECIAL_TRANSACTIONS = {
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
     ],
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
-    # Payroll cycle 1 (Feb 1 is Sunday)
-    "2026-02-02": [{"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"}],  # 1st business day after 1st
-    "2026-02-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # Next day
-    # Payroll cycle 2 (Feb 15 is Sunday)
-    "2026-02-16": [{"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"}],  # 1st business day after 15th
-    # Feb 17: Payroll + AmEx (AmEx hits after 16th)
+    # Feb 2: Comms BOM + Blue Shield + ADP (Feb 1 is Sunday)
+    "2026-02-02": [
+        {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
+        {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
+    ],
+    "2026-02-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    # Feb 16: Comms MID + ADP (Feb 15 is Sunday, Feb 16 is Presidents Day but not a bank holiday for checks)
+    "2026-02-16": [
+        {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
+        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
+    ],
+    # Feb 17: Payroll + AmEx
     "2026-02-17": [
+        {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
+        {"type": "amex", "amount": -100000, "desc": "AmEx Payment"},
+    ],
+    # March BOM (Mar 1 is Sunday)
+    "2026-03-02": [
+        {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
+        {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
+    ],
+    "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-03-16": [
+        {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
+        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
+    ],
+    "2026-03-17": [
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
         {"type": "amex", "amount": -100000, "desc": "AmEx Payment"},
     ],
@@ -963,16 +985,8 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
         detail["debits"]["ops"] = DAILY_OPS
         detail["debits"]["total"] = DAILY_OPS
         
-        # Even-thousands checks on 1st and 15th (only if should be included)
-        day_of_month = date.day
-        if day_of_month == 1:
-            if should_include_special_transaction('comms_execs', -BOM_CHECKS, date_str):
-                detail["special"].append({"type": "comms_execs", "amount": -BOM_CHECKS, "desc": "Comms & Execs"})
-                detail["debits"]["total"] += BOM_CHECKS
-        elif day_of_month == 15:
-            if should_include_special_transaction('comms_execs', -MID_CHECKS, date_str):
-                detail["special"].append({"type": "comms_execs", "amount": -MID_CHECKS, "desc": "Comms & Execs"})
-                detail["debits"]["total"] += MID_CHECKS
+        # Note: Comms & Execs and Blue Shield are now tracked in SPECIAL_TRANSACTIONS
+        # to properly handle weekend/holiday adjustments
     
     # Add special transactions (AmEx, payroll, etc.) on ANY day including weekends
     if date_str in SPECIAL_TRANSACTIONS:
