@@ -851,7 +851,7 @@ SPECIAL_TRANSACTIONS = {
 DAILY_AUTHNET = 15836  # CC processor deposits - weighted avg (80% last 2 weeks, 20% 90-day)
 DAILY_CHECK_DEPOSITS = 14059  # E-Deposits - weighted avg (50% last 2 weeks, 50% 60-day normalized)
 DAILY_WIRE = 1907  # ~$9.5K/week from CFI and FRE - weighted avg (50% last 2 weeks, 50% 60-day normalized)
-DAILY_OPS = 18773  # Daily ops - checks only (excludes ACH, even-thousands, 5-series payroll)
+DAILY_OPS = 9044  # Daily ops - refund checks only (< $1,500, excludes 5-series payroll)
 MONTHLY_RENT = 8500  # Approximate monthly rent
 MONTHLY_RECURRING = 5000  # Insurance, utilities, etc.
 
