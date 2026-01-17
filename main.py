@@ -123,7 +123,7 @@ MONTHLY_PAYROLL = 206000
 # Fallback forecast if database is empty
 DEFAULT_FORECAST = {
     "2026-01-15": {"balance": 237000, "note": "Normal ops"},
-    "2026-01-16": {"balance": 225000, "note": "AmEx $106K payment"},
+    "2026-01-16": {"balance": 225000, "note": "AmEx $112K payment ($26.8K + $85.6K)"},
     "2026-01-17": {"balance": 221000, "note": "Normal ops"},
     "2026-01-20": {"balance": 184000, "note": "LOW POINT - MLK holiday"},
     "2026-01-21": {"balance": 195000, "note": "Recovery begins"},
@@ -816,7 +816,10 @@ async def get_transactions(
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
     # AmEx payments
-    "2026-01-16": [{"type": "amex", "amount": -106000, "desc": "AmEx Payment"}],
+    "2026-01-16": [
+        {"type": "amex", "amount": -26763, "desc": "AmEx Payment"},
+        {"type": "amex", "amount": -85636, "desc": "AmEx Payment"},
+    ],
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
     "2026-02-13": [{"type": "amex", "amount": -100000, "desc": "AmEx Payment"}],
     # Payroll cycle 1 (Feb 1 is Sunday)
@@ -1384,7 +1387,7 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         from datetime import date
         today = date.today()
         payments = [
-            {"date": "2026-01-16", "desc": "AmEx Payment", "amount": 106000},
+            {"date": "2026-01-16", "desc": "AmEx Payment", "amount": 112399},
             {"date": "2026-01-31", "desc": "AmEx Payment", "amount": 130000},
             {"date": "2026-02-02", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
             {"date": "2026-02-03", "desc": "Payroll Checks", "amount": 60000},
