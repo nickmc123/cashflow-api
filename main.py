@@ -827,14 +827,11 @@ async def get_transactions(
 # Projection generators
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
-    # January payroll cycle 2 - ADP today, checks Tuesday
-    "2026-01-16": [
-        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},  # 1st business day after 15th
-    ],
-    # Tuesday Jan 20 - AmEx + Payroll (Mon is MLK Day)
+    # Tuesday Jan 20 - Everything hits after MLK Day weekend
     "2026-01-20": [
         {"type": "amex", "amount": -26763, "desc": "AmEx Payment"},
         {"type": "amex", "amount": -85636, "desc": "AmEx Payment"},
+        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
     ],
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
