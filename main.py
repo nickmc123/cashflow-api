@@ -127,7 +127,7 @@ def verify_code(code: str):
 ROLLING_30_DAY = {
     "cash_in": 285000,
     "cash_out": 199500,
-    "gross_profit": -252763,  # Dec 10 - Jan 9: Holiday slump + $270K AmEx prepayment
+    "gross_profit": 50000,  # ~$50K/month positive cash flow (low-point comparison: $123K - $75K injection = $48K improvement)
 }
 
 MONTHLY_PAYROLL = 206000
