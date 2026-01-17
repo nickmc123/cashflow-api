@@ -1071,6 +1071,10 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
                 detail["special"].append(txn)
                 if txn["amount"] < 0:
                     detail["debits"]["total"] += abs(txn["amount"])
+                else:
+                    # Positive amounts are income (BOM spikes, extra expected income)
+                    detail["credits"]["total"] += txn["amount"]
+                    detail["credits"]["special"] = detail["credits"].get("special", 0) + txn["amount"]
     
     # Calculate net
     detail["net"] = detail["credits"]["total"] - detail["debits"]["total"]
