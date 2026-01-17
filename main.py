@@ -815,11 +815,13 @@ async def get_transactions(
 # Projection generators
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
-    # AmEx payments
+    # AmEx payments + January payroll cycle 2
     "2026-01-16": [
         {"type": "amex", "amount": -26763, "desc": "AmEx Payment"},
         {"type": "amex", "amount": -85636, "desc": "AmEx Payment"},
+        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},  # 1st business day after 15th
     ],
+    "2026-01-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # Next day
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
     "2026-02-13": [{"type": "amex", "amount": -100000, "desc": "AmEx Payment"}],
     # Payroll cycle 1 (Feb 1 is Sunday)
