@@ -127,7 +127,7 @@ def verify_code(code: str):
 ROLLING_30_DAY = {
     "cash_in": 285000,
     "cash_out": 199500,
-    "gross_profit": 96000,  # ~$96K/month ($48K half-month improvement × 2, low-point comparison after BOM+mid expenses)
+    "gross_profit": 40000,  # ~$40K/month cash flow profit (user estimate, additional sales revenue not fully tracked)
 }
 
 MONTHLY_PAYROLL = 206000
@@ -827,6 +827,11 @@ async def get_transactions(
 # Projection generators
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
+    # Expected extra income - late January
+    "2026-01-28": [{"type": "income", "amount": 30000, "desc": "Expected Extra Income"}],
+    
+
+    
     # Tuesday Jan 20 - Everything hits after MLK Day weekend
     "2026-01-20": [
         {"type": "amex", "amount": -26763, "desc": "AmEx Payment"},
@@ -840,6 +845,8 @@ SPECIAL_TRANSACTIONS = {
         {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
         {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
+        {"type": "income", "amount": 15000, "desc": "BOM Spike (Reduced)"},
+        {"type": "income", "amount": 30000, "desc": "Expected Extra Income"},
     ],
     "2026-02-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
     # Feb 16: Comms MID + ADP (Feb 15 is Sunday, Feb 16 is Presidents Day but not a bank holiday for checks)
@@ -859,6 +866,7 @@ SPECIAL_TRANSACTIONS = {
         {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
         {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
+        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
     "2026-03-16": [
@@ -871,6 +879,70 @@ SPECIAL_TRANSACTIONS = {
     ],
     # March end-of-month AmEx
     "2026-03-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
+    
+    # April 2026
+    "2026-04-01": [
+        {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
+        {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
+    ],
+    "2026-04-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-04-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-04-15": [
+        {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
+        {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
+    ],
+    "2026-04-16": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-04-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-04-30": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
+    
+    # May 2026
+    "2026-05-01": [
+        {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
+        {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
+    ],
+    "2026-05-04": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-05-05": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-05-15": [
+        {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
+        {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
+    ],
+    "2026-05-18": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-05-19": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-05-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
+    
+    # June 2026
+    "2026-06-01": [
+        {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
+        {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
+    ],
+    "2026-06-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-06-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-06-15": [
+        {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
+        {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
+    ],
+    "2026-06-16": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-06-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-06-30": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
+    
+    # July 2026
+    "2026-07-01": [
+        {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
+        {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
+    ],
+    "2026-07-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-07-06": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # After July 4th
+    "2026-07-15": [
+        {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
+        {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
+    ],
+    "2026-07-16": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-07-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-07-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
 }
 
 # Daily averages for credits
