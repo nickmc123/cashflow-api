@@ -828,7 +828,10 @@ async def get_transactions(
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
     # Expected extra income - late January
-    "2026-01-28": [{"type": "income", "amount": 30000, "desc": "Expected Extra Income"}],
+    "2026-01-28": [
+        {"type": "income", "amount": 30000, "desc": "Expected Extra Income"},
+        {"type": "income", "amount": 26000, "desc": "MVW Wire - Client Sales"}
+    ],
     
 
     
