@@ -835,13 +835,16 @@ SPECIAL_TRANSACTIONS = {
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
     ],
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
-    "2026-02-13": [{"type": "amex", "amount": -100000, "desc": "AmEx Payment"}],
     # Payroll cycle 1 (Feb 1 is Sunday)
     "2026-02-02": [{"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"}],  # 1st business day after 1st
     "2026-02-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # Next day
     # Payroll cycle 2 (Feb 15 is Sunday)
     "2026-02-16": [{"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"}],  # 1st business day after 15th
-    "2026-02-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # Next day
+    # Feb 17: Payroll + AmEx (AmEx hits after 16th)
+    "2026-02-17": [
+        {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
+        {"type": "amex", "amount": -100000, "desc": "AmEx Payment"},
+    ],
 }
 
 # Daily averages for credits
@@ -925,11 +928,22 @@ def should_include_special_transaction(txn_type: str, amount: int, scheduled_dat
     # Within 2 days window and not yet confirmed - include it
     return True
 
+BANK_HOLIDAYS_2026 = [
+    "2026-01-19",  # MLK Day
+    "2026-02-16",  # Presidents Day - but user said they work, keep ops running
+    "2026-05-25",  # Memorial Day
+    "2026-07-03",  # Independence Day observed
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving
+    "2026-12-25",  # Christmas
+]
+
 def get_daily_detail(date: datetime, forecast: dict) -> dict:
     """Get detailed breakdown for a single day"""
     date_str = date.strftime("%Y-%m-%d")
     dow = date.weekday()
     is_weekend = dow >= 5
+    is_bank_holiday = date_str in BANK_HOLIDAYS_2026
     
     # Start with base structure
     detail = {
@@ -939,8 +953,8 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
         "net": 0
     }
     
-    # Normal credits/debits only on weekdays
-    if not is_weekend:
+    # Normal credits/debits only on weekdays (excluding bank holidays)
+    if not is_weekend and not is_bank_holiday:
         detail["credits"]["authnet"] = DAILY_AUTHNET
         detail["credits"]["checks"] = DAILY_CHECK_DEPOSITS
         detail["credits"]["wires"] = DAILY_WIRE if dow in [1, 3] else 0  # Tue/Thu
