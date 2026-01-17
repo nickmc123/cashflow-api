@@ -8,7 +8,19 @@ import httpx
 import os
 import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import psycopg2
+
+# Pacific timezone
+PACIFIC = ZoneInfo("America/Los_Angeles")
+
+def now_pacific():
+    """Get current datetime in Pacific time"""
+    return datetime.now(PACIFIC)
+
+def today_pacific():
+    """Get current date in Pacific time"""
+    return datetime.now(PACIFIC).date()
 from psycopg2.extras import RealDictCursor
 
 app = FastAPI(title="Casablanca Cash Flow API")
@@ -179,7 +191,7 @@ def get_forecast_from_db():
 
 def get_today_balance():
     """Get balance from forecast - transaction balances are for historical reference only"""
-    today = datetime.now().date()
+    today = today_pacific()
     
     # Use forecast for current balance display
     forecast = get_forecast_from_db()
@@ -207,7 +219,7 @@ def parse_bank_data(raw_data: str) -> list:
     """
     lines = raw_data.strip().split('\n')
     transactions = []
-    current_date = datetime.now()  # Default to today if no date header found
+    current_date = now_pacific()  # Default to today if no date header found
     
     # First try tab-separated format
     for line in lines:
@@ -359,7 +371,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
             await client.post(WEBHOOK_URL, json={
                 "type": "data_submission",
                 "data": submission.data[:5000],
-                "timestamp": datetime.now().isoformat()
+                "timestamp": now_pacific().isoformat()
             })
         return {"status": "queued", "message": "Data sent for processing"}
     
@@ -486,7 +498,7 @@ async def recalculate_balances(code: str = Query(...)):
     if not last_good:
         # Start from forecast if no good balances
         running_balance = get_today_balance()
-        start_date = datetime.now().date() - timedelta(days=30)
+        start_date = today_pacific() - timedelta(days=30)
     else:
         running_balance = float(last_good['balance'])
         start_date = last_good['date']
@@ -548,7 +560,7 @@ async def set_balance(
         # Use the most recent transaction date
         cur.execute("SELECT MAX(date) as max_date FROM bank_transactions")
         row = cur.fetchone()
-        anchor_date = row['max_date'] if row and row['max_date'] else datetime.now().date()
+        anchor_date = row['max_date'] if row and row['max_date'] else today_pacific()
     
     # Get all transactions ordered by date DESC, id DESC (newest first)
     cur.execute("""
@@ -707,7 +719,7 @@ def update_forecast_balance(new_balance: float):
         return
     
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    today = datetime.now().date().strftime("%Y-%m-%d")
+    today = today_pacific().strftime("%Y-%m-%d")
     
     # Get current forecast entry for today
     cur.execute("SELECT balance FROM forecast WHERE date = %s", (today,))
@@ -856,7 +868,7 @@ def should_include_special_transaction(txn_type: str, amount: int, scheduled_dat
     """
     from datetime import datetime, timedelta
     
-    today = datetime.now().date()
+    today = today_pacific()
     scheduled = datetime.strptime(scheduled_date, "%Y-%m-%d").date()
     days_since_scheduled = (today - scheduled).days
     
@@ -963,7 +975,7 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
 
 def generate_daily_projection(days: int) -> dict:
     forecast = get_forecast_from_db()
-    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
     
     # Get the starting balance from forecast (this is the user's set balance)
@@ -1019,7 +1031,7 @@ def generate_daily_projection(days: int) -> dict:
 
 def generate_weekly_projection(weeks: int) -> dict:
     forecast = get_forecast_from_db()
-    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
     
     if today_str in forecast:
@@ -1107,7 +1119,7 @@ def generate_monthly_projection(months: int) -> dict:
     balance = start_balance
     overall_low, overall_high = float('inf'), 0
     
-    current = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    current = now_pacific().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     
     for i in range(months):
         if i == 0:
@@ -1191,7 +1203,7 @@ async def get_summary(code: str = Query(...)):
     
     # Use the projection to get accurate values (includes today's transactions)
     proj = generate_daily_projection(60)
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_pacific().strftime("%Y-%m-%d")
     
     # Today's balance is end-of-day (first row in projection)
     current_balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
@@ -1283,7 +1295,7 @@ async def get_payments(code: str = Query(...)):
     
     # Build a lookup by ISO date
     balance_by_date = {}
-    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     for i, row in enumerate(proj["rows"]):
         iso_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
         balance_by_date[iso_date] = row["balance"]
@@ -1410,7 +1422,7 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         async with httpx.AsyncClient() as client:
             await client.post(WEBHOOK_URL, json={
                 "type": "refresh_request",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": now_pacific().isoformat()
             })
         return {"type": "answer", "text": "Refreshing data from Authorize.Net... Check back in a minute!"}
     
@@ -1419,7 +1431,7 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         await client.post(WEBHOOK_URL, json={
             "type": "unknown_question",
             "question": question,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": now_pacific().isoformat()
         })
     
     return {"type": "answer", "text": "I'll look into that and get back to you!"}
@@ -1430,7 +1442,7 @@ async def request_update(code: str = Query(...)):
     async with httpx.AsyncClient() as client:
         await client.post(WEBHOOK_URL, json={
             "type": "update_request",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": now_pacific().isoformat()
         })
     return {"status": "requested", "message": "Update request sent"}
 
