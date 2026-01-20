@@ -827,20 +827,18 @@ async def get_transactions(
 # Projection generators
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
-    # Expected extra income - late January
+    # Expected extra income - late January (MVW wire already hit Jan 20 @ $20,141)
     "2026-01-28": [
         {"type": "income", "amount": 30000, "desc": "Expected Extra Income"},
-        {"type": "income", "amount": 26000, "desc": "MVW Wire - Client Sales"}
     ],
     
-
-    
-    # Tuesday Jan 20 - Everything hits after MLK Day weekend
-    "2026-01-20": [
-        {"type": "amex", "amount": -26763, "desc": "AmEx Payment"},
-        {"type": "amex", "amount": -85636, "desc": "AmEx Payment"},
-        {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
-        {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
+    # Jan 21 - Remaining items from Jan 20 that haven't cleared yet + outstanding CC deposits
+    "2026-01-21": [
+        {"type": "income", "amount": 12000, "desc": "CC Deposits (Jan 19 settlements)"},
+        {"type": "amex", "amount": -26763, "desc": "AmEx Payment (Remaining)"},
+        {"type": "payroll", "amount": -58500, "desc": "Payroll Checks (Remaining)"},
+        {"type": "other", "amount": -38000, "desc": "TM Travel"},
+        {"type": "comms_execs", "amount": -14000, "desc": "Comms & Execs (Outstanding)"},
     ],
     "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
     # Feb 2: Comms BOM + Blue Shield + ADP (Feb 1 is Sunday)
