@@ -1109,11 +1109,11 @@ def generate_daily_projection(days: int) -> dict:
         # Get note from forecast if available
         note = forecast.get(date_str, {}).get("note", "")
         
-        # For day 0 (today), the stored balance is start-of-day, apply today's net to get end-of-day
-        # For all other days, calculate from previous day's ending balance
+        # For day 0 (today), use the forecast balance as END-of-day (user's current balance already reflects today's transactions)
+        # For all other days, calculate from previous day's ending balance by adding that day's net
         if i == 0:
-            # Apply today's full net (includes special transactions like AmEx)
-            balance = int(start_balance + detail["net"])
+            # User's set balance is already end-of-day - don't add today's net again
+            balance = int(start_balance)
         else:
             balance = int(balance + detail["net"])
         
