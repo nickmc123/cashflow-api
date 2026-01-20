@@ -7,7 +7,7 @@ from typing import Optional
 import httpx
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as DateType
 from zoneinfo import ZoneInfo
 import psycopg2
 
@@ -713,30 +713,117 @@ async def delete_transactions_by_match(request: DeleteByMatchRequest, code: str 
 
 
 def update_forecast_balance(new_balance: float):
-    """Update the forecast starting balance"""
+    """Rebuild forecast from today's balance forward using actual projections"""
+    rebuild_forecast(new_balance)
+
+def rebuild_forecast(starting_balance: float, days_ahead: int = 90):
+    """Rebuild the entire forecast from today forward with proper calculations"""
     conn = get_db()
     if not conn:
         return
     
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    today = today_pacific().strftime("%Y-%m-%d")
+    today = today_pacific()
+    today_str = today.strftime("%Y-%m-%d")
     
-    # Get current forecast entry for today
-    cur.execute("SELECT balance FROM forecast WHERE date = %s", (today,))
-    row = cur.fetchone()
+    # Daily rates (business days only)
+    DAILY_CC = 15836      # CC processor deposits
+    DAILY_EDEPOSIT = 14059  # E-deposits
+    DAILY_WIRES = 1907    # Wire income
+    DAILY_OPS = -9044     # Daily operations (refund checks)
     
-    if row:
-        old_balance = float(row['balance'])
-        diff = new_balance - old_balance
+    # Net daily income on business days (excluding special transactions)
+    DAILY_NET = DAILY_CC + DAILY_EDEPOSIT + DAILY_WIRES + DAILY_OPS  # ~$22,758
+    
+    def is_business_day(d):
+        """Check if date is a business day (weekday, not a bank holiday)"""
+        if d.weekday() >= 5:  # Saturday=5, Sunday=6
+            return False
+        # Bank holidays (add more as needed)
+        holidays = [
+            DateType(2026, 1, 1),   # New Year's
+            DateType(2026, 1, 19),  # MLK Day
+            # Presidents Day (Feb 16) - USER WORKS, not treated as bank holiday
+            DateType(2026, 5, 25),  # Memorial Day
+            DateType(2026, 7, 3),   # July 4th observed
+            DateType(2026, 9, 7),   # Labor Day
+            DateType(2026, 11, 26), # Thanksgiving
+            DateType(2026, 12, 25), # Christmas
+        ]
+        return d not in holidays
+    
+    # Build forecast day by day
+    balance = starting_balance
+    forecast_data = []
+    
+    low_point = {"date": today_str, "balance": balance}
+    high_point = {"date": today_str, "balance": balance}
+    
+    for i in range(days_ahead + 1):
+        current_date = today + timedelta(days=i)
+        date_str = current_date.strftime("%Y-%m-%d")
         
-        # Update all forecast entries by the difference
+        if i == 0:
+            # Today - use the starting balance directly (already reflects today's activity)
+            note = "Current balance"
+        else:
+            # Add daily income on business days
+            if is_business_day(current_date):
+                balance += DAILY_NET
+            
+            # Add special transactions for this date
+            if date_str in SPECIAL_TRANSACTIONS:
+                for txn in SPECIAL_TRANSACTIONS[date_str]:
+                    balance += txn["amount"]
+            
+            note = get_note_for_date(date_str, balance)
+        
+        forecast_data.append({
+            "date": date_str,
+            "balance": round(balance, 2),
+            "note": note
+        })
+        
+        # Track low and high points
+        if balance < low_point["balance"]:
+            low_point = {"date": date_str, "balance": balance}
+        if balance > high_point["balance"]:
+            high_point = {"date": date_str, "balance": balance}
+    
+    # Clear existing forecast from today forward and insert new data
+    cur.execute("DELETE FROM forecast WHERE date >= %s", (today_str,))
+    
+    for entry in forecast_data:
         cur.execute("""
-            UPDATE forecast SET balance = balance + %s WHERE date >= %s
-        """, (diff, today))
+            INSERT INTO forecast (date, balance, note) VALUES (%s, %s, %s)
+            ON CONFLICT (date) DO UPDATE SET balance = %s, note = %s
+        """, (entry["date"], entry["balance"], entry["note"], entry["balance"], entry["note"]))
     
     conn.commit()
     cur.close()
     conn.close()
+    
+    return {"low_point": low_point, "high_point": high_point, "days_projected": len(forecast_data)}
+
+def get_note_for_date(date_str: str, balance: float) -> str:
+    """Generate appropriate note for a forecast date"""
+    if date_str in SPECIAL_TRANSACTIONS:
+        txns = SPECIAL_TRANSACTIONS[date_str]
+        descriptions = [t["desc"] for t in txns if t["amount"] < -10000]
+        if descriptions:
+            return ", ".join(descriptions[:2])
+    
+    # Check for notable balance levels
+    if balance < 100000:
+        return "LOW - Watch closely"
+    elif balance < 150000:
+        return "Tight cash position"
+    elif balance > 400000:
+        return "Peak - Good for distribution"
+    elif balance > 300000:
+        return "Strong position"
+    
+    return "Normal operations"
 
 
 @app.get("/transactions")
