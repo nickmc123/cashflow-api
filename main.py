@@ -1170,18 +1170,14 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
     return detail
 
 def generate_daily_projection(days: int) -> dict:
+    """Generate daily projection using forecast balances from database.
+    The forecast already has special transactions applied via rebuild_forecast(),
+    so we use those balances directly instead of recalculating."""
     forecast = get_forecast_from_db()
     start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
     
-    # Get the starting balance from forecast (this is the user's set balance)
-    if today_str in forecast:
-        start_balance = forecast[today_str]["balance"]
-    else:
-        start_balance = get_today_balance()
-    
     rows = []
-    balance = start_balance
     low_bal, low_date, low_note = float('inf'), None, ""
     high_bal, high_date, high_note = 0, None, ""
     
@@ -1189,18 +1185,23 @@ def generate_daily_projection(days: int) -> dict:
         date = start_date + timedelta(days=i)
         date_str = date.strftime("%Y-%m-%d")
         
-        detail = get_daily_detail(date, forecast)
-        
-        # Get note from forecast if available
-        note = forecast.get(date_str, {}).get("note", "")
-        
-        # For day 0 (today), use the forecast balance as END-of-day (user's current balance already reflects today's transactions)
-        # For all other days, calculate from previous day's ending balance by adding that day's net
-        if i == 0:
-            # User's set balance is already end-of-day - don't add today's net again
-            balance = int(start_balance)
+        # Use forecast balance directly (already includes special transactions)
+        if date_str in forecast:
+            balance = int(forecast[date_str]["balance"])
+            note = forecast[date_str].get("note", "")
         else:
-            balance = int(balance + detail["net"])
+            # If date not in forecast, estimate from last known date
+            sorted_dates = sorted([d for d in forecast.keys() if d <= date_str])
+            if sorted_dates:
+                last_date = sorted_dates[-1]
+                balance = int(forecast[last_date]["balance"])
+                note = ""
+            else:
+                balance = int(get_today_balance())
+                note = ""
+        
+        # Get detail breakdown for display purposes (not for balance calculation)
+        detail = get_daily_detail(date, forecast)
         
         if balance < low_bal:
             low_bal, low_date, low_note = balance, date.strftime("%Y-%m-%d"), note
