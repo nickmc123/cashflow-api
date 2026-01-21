@@ -547,6 +547,68 @@
             align-items: center;
         }
         
+        /* Important Dates Section */
+        .important-dates-section {
+            margin: 10px 0;
+            padding: 10px 0;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .section-header {
+            font-size: 12px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .important-dates-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        
+        .important-date-card {
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+        }
+        
+        .important-date-card .date-label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.8);
+            margin-bottom: 4px;
+        }
+        
+        .important-date-card .amount-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            min-width: 70px;
+            justify-content: center;
+        }
+        
+        .important-date-card .amount-pill.high {
+            background: #2e7d32;
+            color: white;
+        }
+        
+        .important-date-card .amount-pill.low {
+            background: #8b0000;
+            color: white;
+        }
+        
+        .important-date-card .type-badge {
+            font-size: 9px;
+            margin-top: 3px;
+            color: rgba(255,255,255,0.6);
+        }
+        
         /* Chat Page Styles */
         .chat-input-area {
             display: flex;
@@ -620,9 +682,10 @@
             bottom: 0;
             background: linear-gradient(135deg, #FFB84D 0%, #FF8A65 100%);
             z-index: 1000;
-            overflow-y: scroll;
-            padding-bottom: 20px;
-            scrollbar-gutter: stable;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 80px;
         }
         
         .projection-page.active {
@@ -1227,19 +1290,11 @@
                 <span class="status-label">Current Balance</span>
                 <span id="current-balance" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
-            <div class="status-row">
-                <div class="label-with-date">
-                    <span class="status-label">Low Point</span>
-                    <span id="low-point-date" class="status-date">--</span>
+            <div class="important-dates-section">
+                <div class="section-header">Key Dates (60 days)</div>
+                <div id="important-dates-grid" class="important-dates-grid">
+                    <!-- Dynamically populated -->
                 </div>
-                <span id="low-point" class="status-value red"><span class="dollar">$</span><span class="num">Loading</span></span>
-            </div>
-            <div class="status-row">
-                <div class="label-with-date">
-                    <span class="status-label">High Point</span>
-                    <span id="high-point-date" class="status-date">--</span>
-                </div>
-                <span id="high-point" class="status-value green"><span class="dollar">$</span><span class="num">Loading</span></span>
             </div>
             <div class="status-row">
                 <span class="status-label">30-Day Profit</span>
@@ -1492,28 +1547,37 @@ Examples:
                 // Handle new structured JSON format
                 setStatusPill(document.getElementById('current-balance'), data.current_balance);
                 
-                if (data.low_point && typeof data.low_point === 'object') {
-                    setStatusPill(document.getElementById('low-point'), data.low_point.balance);
-                    document.getElementById('low-point-date').textContent = formatShortDate(data.low_point.date);
+                // Populate important dates grid
+                const grid = document.getElementById('important-dates-grid');
+                if (data.important_dates && data.important_dates.length > 0) {
+                    grid.innerHTML = data.important_dates.map(d => {
+                        const isLow = d.type === 'LOW';
+                        const colorClass = isLow ? 'low' : 'high';
+                        const fmtAmt = Math.abs(d.balance) >= 1000 
+                            ? '$' + (Math.abs(d.balance)/1000).toFixed(0) + 'K'
+                            : '$' + Math.abs(d.balance).toLocaleString();
+                        return `
+                            <div class="important-date-card">
+                                <div class="date-label">${formatShortDate(d.date)}</div>
+                                <div class="amount-pill ${colorClass}">${fmtAmt}</div>
+                                <div class="type-badge">${d.type}</div>
+                            </div>
+                        `;
+                    }).join('');
                 } else {
-                    setStatusPill(document.getElementById('low-point'), 0);
-                    document.getElementById('low-point-date').textContent = '--';
-                }
-                
-                if (data.high_point && typeof data.high_point === 'object') {
-                    setStatusPill(document.getElementById('high-point'), data.high_point.balance);
-                    document.getElementById('high-point-date').textContent = formatShortDate(data.high_point.date);
-                } else {
-                    setStatusPill(document.getElementById('high-point'), 0);
-                    document.getElementById('high-point-date').textContent = '--';
+                    grid.innerHTML = '<div style="grid-column: span 3; text-align: center; color: rgba(255,255,255,0.5);">No key dates found</div>';
                 }
                 
                 const profitEl = document.getElementById('profit');
                 profitEl.innerHTML = '<span class="dollar">$</span><span class="num">' + Math.abs(data.profit_30day).toLocaleString() + '/mo</span>';
                 
-                // Status based on current balance
-                const status = data.current_balance < 200000 ? 'Tight' : (data.current_balance < 250000 ? 'OK' : 'Healthy');
-                document.getElementById('status').textContent = status;
+                // Status based on low point in important dates
+                const lowPoints = data.important_dates ? data.important_dates.filter(d => d.type === 'LOW') : [];
+                const minBalance = lowPoints.length > 0 ? Math.min(...lowPoints.map(d => d.balance)) : data.current_balance;
+                const status = minBalance < 100000 ? 'TIGHT' : (minBalance < 150000 ? 'OK' : 'HEALTHY');
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = status;
+                statusEl.className = 'status-value ' + (status === 'HEALTHY' ? 'green' : (status === 'TIGHT' ? 'red' : 'neutral'));
             } catch (e) {
                 console.error('Failed to load status:', e);
             }
