@@ -1408,19 +1408,64 @@ async def get_summary(code: str = Query(...)):
     
     gross_profit = ROLLING_30_DAY['gross_profit']
     
+    # Find important dates (local highs and lows) in next 60 days
+    rows = proj["rows"]
+    important_dates = []
+    
+    for i, row in enumerate(rows):
+        if i == 0 or i == len(rows) - 1:
+            continue
+        prev_bal = rows[i-1]["balance"]
+        curr_bal = row["balance"]
+        next_bal = rows[i+1]["balance"]
+        
+        # Local minimum (lower than both neighbors)
+        if curr_bal < prev_bal and curr_bal < next_bal:
+            important_dates.append({
+                "date": row["date"],
+                "balance": curr_bal,
+                "type": "LOW",
+                "note": row.get("note", "")
+            })
+        # Local maximum (higher than both neighbors)
+        elif curr_bal > prev_bal and curr_bal > next_bal:
+            important_dates.append({
+                "date": row["date"],
+                "balance": curr_bal,
+                "type": "HIGH",
+                "note": row.get("note", "")
+            })
+    
+    # Also include absolute min and max if not already there
+    min_row = min(rows, key=lambda x: x["balance"])
+    max_row = max(rows, key=lambda x: x["balance"])
+    
+    min_date = min_row["date"]
+    max_date = max_row["date"]
+    
+    if not any(d["date"] == min_date for d in important_dates):
+        important_dates.append({
+            "date": min_date,
+            "balance": min_row["balance"],
+            "type": "LOW",
+            "note": min_row.get("note", "")
+        })
+    if not any(d["date"] == max_date for d in important_dates):
+        important_dates.append({
+            "date": max_date,
+            "balance": max_row["balance"],
+            "type": "HIGH",
+            "note": max_row.get("note", "")
+        })
+    
+    # Sort by date and take first 6
+    important_dates.sort(key=lambda x: x["date"])
+    important_dates = important_dates[:6]
+    
     return {
         "current_balance": current_balance,
         "as_of": today,
-        "low_point": {
-            "balance": proj["low"]["value"],
-            "date": proj["low"]["label"],
-            "note": proj["low"].get("note", "")
-        },
-        "high_point": {
-            "balance": proj["high"]["value"],
-            "date": proj["high"]["label"],
-            "note": proj["high"].get("note", "")
-        },
+        "important_dates": important_dates,
         "profit_30day": gross_profit
     }
 
