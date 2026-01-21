@@ -1211,6 +1211,7 @@ def generate_daily_projection(days: int) -> dict:
         
         rows.append({
             "date": date.strftime("%a %b %d"),
+            "iso_date": date.strftime("%Y-%m-%d"),
             "balance": balance,
             "note": note,
             "credits": detail["credits"],
@@ -1423,6 +1424,7 @@ async def get_summary(code: str = Query(...)):
         if curr_bal < prev_bal and curr_bal < next_bal:
             important_dates.append({
                 "date": row["date"],
+                "iso_date": row["iso_date"],
                 "balance": curr_bal,
                 "type": "LOW",
                 "note": row.get("note", "")
@@ -1431,6 +1433,7 @@ async def get_summary(code: str = Query(...)):
         elif curr_bal > prev_bal and curr_bal > next_bal:
             important_dates.append({
                 "date": row["date"],
+                "iso_date": row["iso_date"],
                 "balance": curr_bal,
                 "type": "HIGH",
                 "note": row.get("note", "")
@@ -1440,26 +1443,28 @@ async def get_summary(code: str = Query(...)):
     min_row = min(rows, key=lambda x: x["balance"])
     max_row = max(rows, key=lambda x: x["balance"])
     
-    min_date = min_row["date"]
-    max_date = max_row["date"]
+    min_iso = min_row["iso_date"]
+    max_iso = max_row["iso_date"]
     
-    if not any(d["date"] == min_date for d in important_dates):
+    if not any(d["iso_date"] == min_iso for d in important_dates):
         important_dates.append({
-            "date": min_date,
+            "date": min_row["date"],
+            "iso_date": min_iso,
             "balance": min_row["balance"],
             "type": "LOW",
             "note": min_row.get("note", "")
         })
-    if not any(d["date"] == max_date for d in important_dates):
+    if not any(d["iso_date"] == max_iso for d in important_dates):
         important_dates.append({
-            "date": max_date,
+            "date": max_row["date"],
+            "iso_date": max_iso,
             "balance": max_row["balance"],
             "type": "HIGH",
             "note": max_row.get("note", "")
         })
     
-    # Sort by date and take first 6
-    important_dates.sort(key=lambda x: x["date"])
+    # Sort by ISO date (chronological) and take first 6
+    important_dates.sort(key=lambda x: x["iso_date"])
     important_dates = important_dates[:6]
     
     return {
