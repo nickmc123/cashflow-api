@@ -1558,7 +1558,7 @@ Examples:
                             : '$' + Math.abs(d.balance).toLocaleString();
                         return `
                             <div class="important-date-card">
-                                <div class="date-label">${formatShortDate(d.date)}</div>
+                                <div class="date-label">${formatShortDate(d.iso_date)}</div>
                                 <div class="amount-pill ${colorClass}">${fmtAmt}</div>
                                 <div class="type-badge">${d.type}</div>
                             </div>
