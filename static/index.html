@@ -1698,9 +1698,11 @@ Examples:
                     if (Array.isArray(special)) {
                         // Daily format - array of transactions
                         special.forEach(txn => {
+                            const sign = txn.amount >= 0 ? '+' : '-';
+                            const colorClass = txn.amount >= 0 ? 'credit' : 'special';
                             bodyHtml += `<div class="proj-section-row">
                                 <span class="proj-section-label">${txn.desc}</span>
-                                <span class="proj-section-value special">-${fmt(Math.abs(txn.amount))}</span>
+                                <span class="proj-section-value ${colorClass}">${sign}${fmt(Math.abs(txn.amount))}</span>
                             </div>`;
                         });
                     } else {
