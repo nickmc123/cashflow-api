@@ -1839,9 +1839,9 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
-            SELECT date, amount, description 
+            SELECT date, credit, description 
             FROM bank_transactions 
-            WHERE type = 'credit' 
+            WHERE credit > 0 
             AND (LOWER(description) LIKE '%cms%' OR LOWER(description) LIKE '%cmsrelease%')
             ORDER BY date DESC
             LIMIT 100
@@ -1856,13 +1856,13 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         from collections import defaultdict
         from datetime import datetime, timedelta
         weekly = defaultdict(float)
-        for date, amount, desc in rows:
+        for date, credit, desc in rows:
             if isinstance(date, str):
                 dt = datetime.strptime(date, '%Y-%m-%d')
             else:
                 dt = date
             week_start = dt - timedelta(days=dt.weekday())
-            weekly[week_start.strftime('%Y-%m-%d')] += float(amount)
+            weekly[week_start.strftime('%Y-%m-%d')] += float(credit)
         
         # Get recent weeks
         sorted_weeks = sorted(weekly.keys(), reverse=True)[:4]
