@@ -1854,15 +1854,22 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
         
         # Calculate weekly totals
         from collections import defaultdict
-        from datetime import datetime, timedelta
+        from datetime import datetime as dt_class, timedelta, date as date_class
         weekly = defaultdict(float)
-        for date, credit, desc in rows:
-            if isinstance(date, str):
-                dt = datetime.strptime(date, '%Y-%m-%d')
-            else:
-                dt = date
-            week_start = dt - timedelta(days=dt.weekday())
-            weekly[week_start.strftime('%Y-%m-%d')] += float(credit)
+        for row_date, credit, desc in rows:
+            try:
+                if isinstance(row_date, str):
+                    dt = dt_class.strptime(row_date, '%Y-%m-%d').date()
+                elif isinstance(row_date, dt_class):
+                    dt = row_date.date()
+                elif isinstance(row_date, date_class):
+                    dt = row_date
+                else:
+                    continue
+                week_start = dt - timedelta(days=dt.weekday())
+                weekly[week_start.strftime('%Y-%m-%d')] += float(credit)
+            except Exception:
+                continue
         
         # Get recent weeks
         sorted_weeks = sorted(weekly.keys(), reverse=True)[:4]
