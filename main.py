@@ -957,6 +957,7 @@ SPECIAL_TRANSACTIONS = {
         {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-03-05": [{"type": "income", "amount": 60000, "desc": "Client Revenue Payment"}],
     "2026-03-16": [
         {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
