@@ -1833,6 +1833,60 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
             lines.append(f"• {p['date']}: {p['desc']} - ${p['amount']:,.0f}")
         return {"type": "answer", "text": "\n".join(lines)}
     
+    # Check deposit / e-deposit estimate queries
+    if 'check' in q and ('deposit' in q or 'estimate' in q):
+        # Calculate CMS check deposit performance
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT date, amount, description 
+            FROM bank_transactions 
+            WHERE type = 'credit' 
+            AND (LOWER(description) LIKE '%cms%' OR LOWER(description) LIKE '%cmsrelease%')
+            ORDER BY date DESC
+            LIMIT 100
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        
+        if not rows:
+            return {"type": "answer", "text": "📊 **Check Deposit Status**\n\nNo check deposit data available. Please import recent bank data to see performance vs estimate.\n\n**Estimate:** $14,059/day (~$70K/week)"}
+        
+        # Calculate weekly totals
+        from collections import defaultdict
+        from datetime import datetime, timedelta
+        weekly = defaultdict(float)
+        for date, amount, desc in rows:
+            if isinstance(date, str):
+                dt = datetime.strptime(date, '%Y-%m-%d')
+            else:
+                dt = date
+            week_start = dt - timedelta(days=dt.weekday())
+            weekly[week_start.strftime('%Y-%m-%d')] += float(amount)
+        
+        # Get recent weeks
+        sorted_weeks = sorted(weekly.keys(), reverse=True)[:4]
+        target_weekly = 70000
+        
+        lines = ["📊 **Check Deposit Performance**", "", "**Target:** $14,059/day (~$70K/week)", ""]
+        
+        total_recent = 0
+        for week in sorted_weeks:
+            total = weekly[week]
+            total_recent += total
+            pct = (total / target_weekly) * 100
+            status = "✅" if pct >= 90 else "⚠️" if pct >= 70 else "❌"
+            lines.append(f"• Week of {week}: ${total:,.0f} ({pct:.0f}%) {status}")
+        
+        avg = total_recent / len(sorted_weeks) if sorted_weeks else 0
+        variance = ((avg / target_weekly) - 1) * 100
+        
+        lines.append("")
+        lines.append(f"**4-Week Avg:** ${avg:,.0f}/week")
+        lines.append(f"**Variance:** {variance:+.0f}% vs estimate")
+        
+        return {"type": "answer", "text": "\n".join(lines)}
+    
     # Refresh/update requests
     if 'refresh' in q or 'update' in q:
         async with httpx.AsyncClient() as client:
