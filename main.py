@@ -1154,16 +1154,13 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
         # to properly handle weekend/holiday adjustments
     
     # Add special transactions (AmEx, payroll, etc.) on ANY day including weekends
+    # Note: Special transactions are shown separately and NOT added to credits/debits totals
+    # to avoid visual double-counting. Balance calculation uses forecast DB which already
+    # has these applied.
     if date_str in SPECIAL_TRANSACTIONS:
         for txn in SPECIAL_TRANSACTIONS[date_str]:
             if should_include_special_transaction(txn["type"], txn["amount"], date_str):
                 detail["special"].append(txn)
-                if txn["amount"] < 0:
-                    detail["debits"]["total"] += abs(txn["amount"])
-                else:
-                    # Positive amounts are income (BOM spikes, extra expected income)
-                    detail["credits"]["total"] += txn["amount"]
-                    detail["credits"]["special"] = detail["credits"].get("special", 0) + txn["amount"]
     
     # Calculate net
     detail["net"] = detail["credits"]["total"] - detail["debits"]["total"]
