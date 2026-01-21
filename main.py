@@ -48,6 +48,146 @@ def get_db():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
+
+def get_recent_bank_transactions(days: int = 15) -> list:
+    """Get recent bank transactions for matching against scheduled transactions"""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cutoff_date = today_pacific() - timedelta(days=days)
+    
+    cur.execute("""
+        SELECT date, description, debit, credit, balance
+        FROM bank_transactions 
+        WHERE date >= %s
+        ORDER BY date DESC
+    """, (cutoff_date,))
+    
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    
+    return [dict(r) for r in rows]
+
+
+def check_transaction_cleared(scheduled_txn: dict, real_transactions: list, scheduled_date: str) -> bool:
+    """
+    Check if a scheduled transaction has already cleared by matching against real bank transactions.
+    
+    Matching rules:
+    - AmEx: Look for 'AMEX' or 'AMERICAN EXPRESS' in description, amount within 20% of scheduled
+    - Payroll checks: Look for check numbers starting with 5 or containing '5-series', total within 20%
+    - ADP/Tax: Look for 'ADP' in description
+    - Comms & Execs: Look for recurring check patterns, large check amounts
+    - Blue Shield: Look for 'BLUE SHIELD' or 'HEALTH' in description
+    - TM Travel: Look for 'TM TRAVEL' or similar in description
+    - General: Match by amount (within 10%) and date (within 3 days)
+    """
+    from datetime import datetime
+    
+    txn_type = scheduled_txn.get("type", "other")
+    txn_amount = abs(scheduled_txn.get("amount", 0))
+    txn_desc = scheduled_txn.get("desc", "").upper()
+    scheduled_dt = datetime.strptime(scheduled_date, "%Y-%m-%d").date()
+    
+    # Look for matches in the date range (scheduled date - 3 days to + 2 days)
+    date_range_start = scheduled_dt - timedelta(days=3)
+    date_range_end = scheduled_dt + timedelta(days=2)
+    
+    for real_txn in real_transactions:
+        real_date = real_txn["date"]
+        if isinstance(real_date, str):
+            real_date = datetime.strptime(real_date, "%Y-%m-%d").date()
+        
+        # Check if within date range
+        if not (date_range_start <= real_date <= date_range_end):
+            continue
+        
+        real_desc = (real_txn.get("description") or "").upper()
+        real_debit = abs(float(real_txn.get("debit") or 0))
+        real_credit = abs(float(real_txn.get("credit") or 0))
+        
+        # Different matching rules based on transaction type
+        if txn_type == "amex":
+            if ("AMEX" in real_desc or "AMERICAN EXPRESS" in real_desc) and real_debit > 0:
+                # Check if amount is within 30% (AmEx payments can vary)
+                if 0.7 * txn_amount <= real_debit <= 1.3 * txn_amount:
+                    return True
+        
+        elif txn_type == "payroll":
+            # Match payroll checks - look for 5-series check numbers or 'PAYROLL'
+            if ("CHECK" in real_desc or real_desc.startswith("5")) and real_debit > 0:
+                if 0.8 * txn_amount <= real_debit <= 1.2 * txn_amount:
+                    return True
+        
+        elif txn_type == "payroll_tax":
+            if ("ADP" in real_desc or "401K" in real_desc or "TAX" in real_desc) and real_debit > 0:
+                if 0.8 * txn_amount <= real_debit <= 1.2 * txn_amount:
+                    return True
+        
+        elif txn_type == "comms_execs":
+            # Comms & Execs are recurring checks - match by amount
+            if real_debit > 0 and 0.9 * txn_amount <= real_debit <= 1.1 * txn_amount:
+                return True
+        
+        elif txn_type == "blue_shield":
+            if ("BLUE SHIELD" in real_desc or "HEALTH" in real_desc or "INSURANCE" in real_desc):
+                if real_debit > 0 and 0.8 * txn_amount <= real_debit <= 1.2 * txn_amount:
+                    return True
+        
+        elif txn_type == "income":
+            # Income transactions - look for matching credits
+            if real_credit > 0 and 0.9 * txn_amount <= real_credit <= 1.1 * txn_amount:
+                # Check if description matches somewhat
+                if any(word in real_desc for word in ["WIRE", "TRANSFER", "DEPOSIT", "MVW", "CFI"]):
+                    return True
+        
+        elif txn_type == "other":
+            # General matching - look for similar amounts
+            if real_debit > 0 and 0.9 * txn_amount <= real_debit <= 1.1 * txn_amount:
+                # Check for keyword matches in description
+                desc_words = txn_desc.split()
+                if any(word in real_desc for word in desc_words if len(word) > 3):
+                    return True
+    
+    return False
+
+
+def get_pending_special_transactions(days_lookback: int = 15) -> dict:
+    """
+    Get special transactions that haven't cleared yet.
+    Compares SPECIAL_TRANSACTIONS against real bank transactions.
+    
+    Returns dict with same structure as SPECIAL_TRANSACTIONS but only with pending items.
+    """
+    real_txns = get_recent_bank_transactions(days_lookback)
+    today = today_pacific()
+    
+    pending = {}
+    
+    for date_str, txns in SPECIAL_TRANSACTIONS.items():
+        scheduled_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        
+        # Skip dates more than lookback days in the past
+        if scheduled_date < today - timedelta(days=days_lookback):
+            continue
+        
+        pending_txns = []
+        for txn in txns:
+            # For future dates, include all transactions
+            if scheduled_date > today:
+                pending_txns.append(txn)
+            # For past/current dates, check if cleared
+            elif not check_transaction_cleared(txn, real_txns, date_str):
+                pending_txns.append(txn)
+        
+        if pending_txns:
+            pending[date_str] = pending_txns
+    
+    return pending
+
 def init_db():
     """Initialize database tables"""
     conn = get_db()
@@ -717,7 +857,11 @@ def update_forecast_balance(new_balance: float):
     rebuild_forecast(new_balance)
 
 def rebuild_forecast(starting_balance: float, days_ahead: int = 90):
-    """Rebuild the entire forecast from today forward with proper calculations"""
+    """Rebuild the entire forecast from today forward with proper calculations.
+    
+    Uses smart matching to compare scheduled transactions against real bank transactions
+    from the last 15 days to identify which have already cleared.
+    """
     conn = get_db()
     if not conn:
         return
@@ -752,6 +896,9 @@ def rebuild_forecast(starting_balance: float, days_ahead: int = 90):
         ]
         return d not in holidays
     
+    # Get pending special transactions (those that haven't cleared yet)
+    pending_special = get_pending_special_transactions(days_lookback=15)
+    
     # Build forecast day by day
     balance = starting_balance
     forecast_data = []
@@ -771,12 +918,12 @@ def rebuild_forecast(starting_balance: float, days_ahead: int = 90):
             if is_business_day(current_date):
                 balance += DAILY_NET
             
-            # Add special transactions for this date
-            if date_str in SPECIAL_TRANSACTIONS:
-                for txn in SPECIAL_TRANSACTIONS[date_str]:
+            # Add only PENDING special transactions for this date
+            if date_str in pending_special:
+                for txn in pending_special[date_str]:
                     balance += txn["amount"]
             
-            note = get_note_for_date(date_str, balance)
+            note = get_note_for_date(date_str, balance, pending_special)
         
         forecast_data.append({
             "date": date_str,
@@ -805,10 +952,13 @@ def rebuild_forecast(starting_balance: float, days_ahead: int = 90):
     
     return {"low_point": low_point, "high_point": high_point, "days_projected": len(forecast_data)}
 
-def get_note_for_date(date_str: str, balance: float) -> str:
+def get_note_for_date(date_str: str, balance: float, pending_special: dict = None) -> str:
     """Generate appropriate note for a forecast date"""
-    if date_str in SPECIAL_TRANSACTIONS:
-        txns = SPECIAL_TRANSACTIONS[date_str]
+    # Use pending_special if provided, otherwise fall back to SPECIAL_TRANSACTIONS
+    txn_source = pending_special if pending_special is not None else SPECIAL_TRANSACTIONS
+    
+    if date_str in txn_source:
+        txns = txn_source[date_str]
         descriptions = [t["desc"] for t in txns if t["amount"] < -10000]
         if descriptions:
             return ", ".join(descriptions[:2])
@@ -1125,12 +1275,20 @@ BANK_HOLIDAYS_2026 = [
     "2026-12-25",  # Christmas
 ]
 
-def get_daily_detail(date: datetime, forecast: dict) -> dict:
-    """Get detailed breakdown for a single day"""
+def get_daily_detail(date: datetime, forecast: dict, pending_special: dict = None) -> dict:
+    """Get detailed breakdown for a single day.
+    
+    If pending_special is provided, uses that instead of SPECIAL_TRANSACTIONS
+    to show only transactions that haven't cleared yet.
+    """
     date_str = date.strftime("%Y-%m-%d")
     dow = date.weekday()
     is_weekend = dow >= 5
     is_bank_holiday = date_str in BANK_HOLIDAYS_2026
+    
+    # Get pending special transactions if not provided
+    if pending_special is None:
+        pending_special = get_pending_special_transactions(days_lookback=15)
     
     # Start with base structure
     detail = {
@@ -1150,15 +1308,13 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
         detail["debits"]["ops"] = DAILY_OPS
         detail["debits"]["total"] = DAILY_OPS
         
-        # Note: Comms & Execs and Blue Shield are now tracked in SPECIAL_TRANSACTIONS
+        # Note: Comms & Execs and Blue Shield are now tracked in special transactions
         # to properly handle weekend/holiday adjustments
     
     # Add special transactions (AmEx, payroll, etc.) on ANY day including weekends
-    # Note: Special transactions are shown separately and NOT added to credits/debits totals
-    # to avoid visual double-counting. Balance calculation uses forecast DB which already
-    # has these applied.
-    if date_str in SPECIAL_TRANSACTIONS:
-        for txn in SPECIAL_TRANSACTIONS[date_str]:
+    # Only show PENDING transactions (those that haven't cleared yet)
+    if date_str in pending_special:
+        for txn in pending_special[date_str]:
             if should_include_special_transaction(txn["type"], txn["amount"], date_str):
                 detail["special"].append(txn)
     
@@ -1169,11 +1325,16 @@ def get_daily_detail(date: datetime, forecast: dict) -> dict:
 
 def generate_daily_projection(days: int) -> dict:
     """Generate daily projection using forecast balances from database.
-    The forecast already has special transactions applied via rebuild_forecast(),
-    so we use those balances directly instead of recalculating."""
+    
+    Uses smart matching to only show pending special transactions (those that
+    haven't cleared yet based on real bank transaction history).
+    """
     forecast = get_forecast_from_db()
     start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
+    
+    # Pre-fetch pending special transactions (avoids repeated DB calls)
+    pending_special = get_pending_special_transactions(days_lookback=15)
     
     rows = []
     low_bal, low_date, low_note = float('inf'), None, ""
@@ -1198,8 +1359,8 @@ def generate_daily_projection(days: int) -> dict:
                 balance = int(get_today_balance())
                 note = ""
         
-        # Get detail breakdown for display purposes (not for balance calculation)
-        detail = get_daily_detail(date, forecast)
+        # Get detail breakdown for display purposes (uses pending_special)
+        detail = get_daily_detail(date, forecast, pending_special)
         
         if balance < low_bal:
             low_bal, low_date, low_note = balance, date.strftime("%Y-%m-%d"), note
@@ -1226,9 +1387,16 @@ def generate_daily_projection(days: int) -> dict:
     }
 
 def generate_weekly_projection(weeks: int) -> dict:
+    """Generate weekly projection with smart transaction matching.
+    
+    Uses pending special transactions (those that haven't cleared yet).
+    """
     forecast = get_forecast_from_db()
     start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
+    
+    # Pre-fetch pending special transactions (avoids repeated DB calls)
+    pending_special = get_pending_special_transactions(days_lookback=15)
     
     if today_str in forecast:
         start_balance = forecast[today_str]["balance"]
@@ -1252,7 +1420,7 @@ def generate_weekly_projection(weeks: int) -> dict:
         for j in range(7):
             d = week_start + timedelta(days=j)
             d_str = d.strftime("%Y-%m-%d")
-            detail = get_daily_detail(d, forecast)
+            detail = get_daily_detail(d, forecast, pending_special)
             
             # Accumulate credits
             week_credits["authnet"] += detail["credits"]["authnet"]
