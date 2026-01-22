@@ -1732,57 +1732,49 @@ async def get_summary(code: str = Query(...)):
     gross_profit = ROLLING_30_DAY['gross_profit']
     
     # Find important dates (local highs and lows) in next 60 days
-    # Handle weekend plateaus by looking for trend changes
+    # Only consider weekdays to avoid weekend plateaus
     rows = proj["rows"]
+    
+    # Filter to weekdays only (Mon-Fri)
+    from datetime import datetime
+    weekday_rows = []
+    for row in rows:
+        dt = datetime.strptime(row["iso_date"], "%Y-%m-%d")
+        if dt.weekday() < 5:  # 0=Mon, 4=Fri
+            weekday_rows.append(row)
+    
     important_dates = []
     
-    # First pass: find all turning points (where trend changes direction)
-    # Track last non-equal value to handle plateaus
-    i = 1
-    while i < len(rows) - 1:
-        curr_bal = rows[i]["balance"]
+    # Find local highs and lows among weekdays
+    for i, row in enumerate(weekday_rows):
+        if i == 0 or i == len(weekday_rows) - 1:
+            continue
+        prev_bal = weekday_rows[i-1]["balance"]
+        curr_bal = row["balance"]
+        next_bal = weekday_rows[i+1]["balance"]
         
-        # Look backwards for a different value
-        prev_bal = None
-        for j in range(i-1, -1, -1):
-            if rows[j]["balance"] != curr_bal:
-                prev_bal = rows[j]["balance"]
-                break
-        
-        # Look forwards for a different value
-        next_bal = None
-        for j in range(i+1, len(rows)):
-            if rows[j]["balance"] != curr_bal:
-                next_bal = rows[j]["balance"]
-                break
-        
-        if prev_bal is not None and next_bal is not None:
-            # Local minimum (lower than both non-equal neighbors)
-            if curr_bal < prev_bal and curr_bal < next_bal:
-                # Only add if not already a date with same balance
-                if not any(d["balance"] == curr_bal and d["type"] == "LOW" for d in important_dates):
-                    important_dates.append({
-                        "date": rows[i]["date"],
-                        "iso_date": rows[i]["iso_date"],
-                        "balance": curr_bal,
-                        "type": "LOW",
-                        "note": rows[i].get("note", "")
-                    })
-            # Local maximum (higher than both non-equal neighbors)
-            elif curr_bal > prev_bal and curr_bal > next_bal:
-                if not any(d["balance"] == curr_bal and d["type"] == "HIGH" for d in important_dates):
-                    important_dates.append({
-                        "date": rows[i]["date"],
-                        "iso_date": rows[i]["iso_date"],
-                        "balance": curr_bal,
-                        "type": "HIGH",
-                        "note": rows[i].get("note", "")
-                    })
-        i += 1
+        # Local minimum (lower than both neighbors)
+        if curr_bal < prev_bal and curr_bal < next_bal:
+            important_dates.append({
+                "date": row["date"],
+                "iso_date": row["iso_date"],
+                "balance": curr_bal,
+                "type": "LOW",
+                "note": row.get("note", "")
+            })
+        # Local maximum (higher than both neighbors)
+        elif curr_bal > prev_bal and curr_bal > next_bal:
+            important_dates.append({
+                "date": row["date"],
+                "iso_date": row["iso_date"],
+                "balance": curr_bal,
+                "type": "HIGH",
+                "note": row.get("note", "")
+            })
     
-    # Also include absolute min and max if not already there
-    min_row = min(rows, key=lambda x: x["balance"])
-    max_row = max(rows, key=lambda x: x["balance"])
+    # Also include absolute min and max among weekdays if not already there
+    min_row = min(weekday_rows, key=lambda x: x["balance"])
+    max_row = max(weekday_rows, key=lambda x: x["balance"])
     
     min_iso = min_row["iso_date"]
     max_iso = max_row["iso_date"]
@@ -1804,45 +1796,9 @@ async def get_summary(code: str = Query(...)):
             "note": max_row.get("note", "")
         })
     
-    # Sort by ISO date chronologically
+    # Sort by ISO date (chronological) and take first 6
     important_dates.sort(key=lambda x: x["iso_date"])
-    
-    # Post-process: ensure alternating HIGH/LOW pattern
-    # If two LOWs are adjacent, find the highest point between them and insert it
-    # If two HIGHs are adjacent, find the lowest point between them and insert it
-    final_dates = []
-    for i, d in enumerate(important_dates):
-        if i > 0 and final_dates:
-            prev = final_dates[-1]
-            # Check if same type as previous
-            if d["type"] == prev["type"]:
-                # Find the opposite extreme between these two dates
-                between_rows = [r for r in rows if prev["iso_date"] < r["iso_date"] < d["iso_date"]]
-                if between_rows:
-                    if d["type"] == "LOW":
-                        # Need to insert a HIGH between two LOWs
-                        max_between = max(between_rows, key=lambda x: x["balance"])
-                        final_dates.append({
-                            "date": max_between["date"],
-                            "iso_date": max_between["iso_date"],
-                            "balance": max_between["balance"],
-                            "type": "HIGH",
-                            "note": max_between.get("note", "")
-                        })
-                    else:
-                        # Need to insert a LOW between two HIGHs
-                        min_between = min(between_rows, key=lambda x: x["balance"])
-                        final_dates.append({
-                            "date": min_between["date"],
-                            "iso_date": min_between["iso_date"],
-                            "balance": min_between["balance"],
-                            "type": "LOW",
-                            "note": min_between.get("note", "")
-                        })
-        final_dates.append(d)
-    
-    # Take first 6 (chronological order preserved)
-    important_dates = final_dates[:6]
+    important_dates = important_dates[:6]
     
     return {
         "current_balance": current_balance,
