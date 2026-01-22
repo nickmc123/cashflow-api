@@ -581,15 +581,13 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         sig = f"{row[0]}|{row[1][:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
         existing.add(sig)
     
-    # Get starting balance from forecast (transaction balances are historical only)
-    running_balance = get_today_balance()
-    
-    # Sort transactions by date (oldest first) to calculate running balance
+    # Sort transactions by date (oldest first)
     transactions.sort(key=lambda x: x['date'])
     
     added_count = 0
     skipped_count = 0
     added_transactions = []  # Track what we added for categorization
+    latest_balance = None  # Track the latest balance from bank data
     
     for tx in transactions:
         tx_date = tx['date'].date() if hasattr(tx['date'], 'date') else tx['date']
@@ -600,14 +598,16 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
             skipped_count += 1
             continue
         
-        # Calculate new balance
-        running_balance = running_balance + float(tx['credit']) - float(tx['debit'])
+        # Use the balance from bank data if available
+        tx_balance = tx.get('balance', 0)
+        if tx_balance and tx_balance > 0:
+            latest_balance = tx_balance
         
-        # Insert transaction with calculated balance
+        # Insert transaction with bank's balance (or 0 if not available)
         cur.execute("""
             INSERT INTO bank_transactions (date, description, debit, credit, balance)
             VALUES (%s, %s, %s, %s, %s)
-        """, (tx_date, tx['description'], tx['debit'], tx['credit'], running_balance))
+        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx_balance))
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
@@ -645,15 +645,19 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         })
     
     # Update forecast balance to latest bank balance and rebuild projections
+    # Use the latest balance from bank data, or get current forecast balance if none
+    if latest_balance is None or latest_balance <= 0:
+        latest_balance = get_today_balance()
+    
     if added_count > 0:
-        rebuild_forecast(running_balance)
+        rebuild_forecast(latest_balance)
     
     return {
         "status": "success",
         "message": f"Added {added_count} new transactions" + (f", skipped {skipped_count} duplicates" if skipped_count else ""),
         "added": added_count,
         "skipped": skipped_count,
-        "latest_balance": running_balance,
+        "latest_balance": latest_balance,
         "categories": category_summary
     }
 
