@@ -498,6 +498,52 @@ def get_existing_transactions(conn, date: datetime.date) -> set:
     cur.close()
     return existing
 
+def categorize_transaction(desc: str, debit: float, credit: float) -> str:
+    """Categorize a transaction based on description and type"""
+    desc_upper = desc.upper() if desc else ""
+    
+    if credit > 0:
+        # Income categories
+        if 'PAYMENTECH' in desc_upper and 'DEPOSIT' in desc_upper:
+            return 'CC Deposits (Visa/MC)'
+        elif 'AMERICAN EXPRESS' in desc_upper and 'SETTLEMENT' in desc_upper:
+            return 'CC Deposits (AmEx)'
+        elif 'CMS' in desc_upper and ('RELEASE' in desc_upper or 'DEPOSIT' in desc_upper):
+            return 'CC Deposits (CMS)'
+        elif 'E-DEPOSIT' in desc_upper:
+            return 'Check Deposits'
+        elif 'MVW' in desc_upper or 'WIRE' in desc_upper:
+            return 'Wire Income'
+        elif 'CHARGEBACK' in desc_upper:
+            return 'Chargeback Reversal'
+        else:
+            return 'Other Income'
+    else:
+        # Expense categories
+        if desc_upper.startswith('CHECK 5') or 'PAYROLL' in desc_upper:
+            return 'Payroll Checks'
+        elif desc_upper.startswith('CHECK '):
+            check_num = desc_upper.replace('CHECK ', '').split()[0]
+            if check_num.isdigit() and int(check_num) < 100000:
+                return 'Refund Checks'
+            return 'Other Checks'
+        elif 'AMEX' in desc_upper and ('EPAYMENT' in desc_upper or 'ACH' in desc_upper):
+            return 'AmEx Payment'
+        elif 'ADP' in desc_upper:
+            if 'TAX' in desc_upper:
+                return 'ADP Tax/Fees'
+            elif '401K' in desc_upper:
+                return 'ADP 401K'
+            return 'ADP Payroll'
+        elif 'BLUE SHIELD' in desc_upper or 'HEALTH' in desc_upper:
+            return 'Health Insurance'
+        elif 'CHARGEBACK' in desc_upper:
+            return 'Chargebacks'
+        elif 'ACCT ANALYSIS' in desc_upper:
+            return 'Bank Fees'
+        else:
+            return 'Other Expenses'
+
 @app.post("/submit-data")
 async def submit_data(submission: DataSubmission, code: str = Query(...)):
     verify_code(code)
@@ -543,6 +589,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     
     added_count = 0
     skipped_count = 0
+    added_transactions = []  # Track what we added for categorization
     
     for tx in transactions:
         tx_date = tx['date'].date() if hasattr(tx['date'], 'date') else tx['date']
@@ -564,17 +611,50 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
+        added_transactions.append({
+            'date': str(tx_date),
+            'description': tx['description'],
+            'debit': float(tx['debit']),
+            'credit': float(tx['credit'])
+        })
     
     conn.commit()
     cur.close()
     conn.close()
+    
+    # Categorize added transactions
+    categories = {}
+    for tx in added_transactions:
+        cat = categorize_transaction(tx['description'], tx['debit'], tx['credit'])
+        if cat not in categories:
+            categories[cat] = {'count': 0, 'total': 0}
+        categories[cat]['count'] += 1
+        if tx['credit'] > 0:
+            categories[cat]['total'] += tx['credit']
+        else:
+            categories[cat]['total'] -= tx['debit']
+    
+    # Format categories for display
+    category_summary = []
+    for cat, data in sorted(categories.items(), key=lambda x: abs(x[1]['total']), reverse=True):
+        category_summary.append({
+            'name': cat,
+            'count': data['count'],
+            'total': data['total'],
+            'type': 'credit' if data['total'] > 0 else 'debit'
+        })
+    
+    # Update forecast balance to latest bank balance and rebuild projections
+    if added_count > 0:
+        rebuild_forecast(running_balance)
     
     return {
         "status": "success",
         "message": f"Added {added_count} new transactions" + (f", skipped {skipped_count} duplicates" if skipped_count else ""),
         "added": added_count,
         "skipped": skipped_count,
-        "latest_balance": running_balance
+        "latest_balance": running_balance,
+        "categories": category_summary
     }
 
 
