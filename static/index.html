@@ -2252,41 +2252,64 @@ Examples:
                 return;
             }
             
-            // Switch to loading view
-            document.getElementById('paste-input-view').style.display = 'none';
-            document.getElementById('paste-loading-view').style.display = 'block';
-            document.getElementById('paste-results-view').style.display = 'none';
-            document.getElementById('paste-loading-status').textContent = 'Parsing transactions...';
+            console.log('Starting data submission...');
+            
+            // Switch to loading view (keep modal open!)
+            const inputView = document.getElementById('paste-input-view');
+            const loadingView = document.getElementById('paste-loading-view');
+            const resultsView = document.getElementById('paste-results-view');
+            const loadingStatus = document.getElementById('paste-loading-status');
+            
+            if (!inputView || !loadingView || !resultsView) {
+                console.error('Missing view elements!', {inputView, loadingView, resultsView});
+                alert('UI error - please refresh the page');
+                return;
+            }
+            
+            inputView.style.display = 'none';
+            loadingView.style.display = 'block';
+            resultsView.style.display = 'none';
+            if (loadingStatus) loadingStatus.textContent = 'Parsing transactions...';
+            
+            // Status update timers
+            const timer1 = setTimeout(() => {
+                if (loadingStatus) loadingStatus.textContent = 'Checking for duplicates...';
+            }, 500);
+            const timer2 = setTimeout(() => {
+                if (loadingStatus) loadingStatus.textContent = 'Categorizing transactions...';
+            }, 1500);
+            const timer3 = setTimeout(() => {
+                if (loadingStatus) loadingStatus.textContent = 'Updating projections...';
+            }, 2500);
             
             try {
-                // Update status as we go
-                setTimeout(() => {
-                    const status = document.getElementById('paste-loading-status');
-                    if (status) status.textContent = 'Checking for duplicates...';
-                }, 500);
-                setTimeout(() => {
-                    const status = document.getElementById('paste-loading-status');
-                    if (status) status.textContent = 'Categorizing transactions...';
-                }, 1500);
-                setTimeout(() => {
-                    const status = document.getElementById('paste-loading-status');
-                    if (status) status.textContent = 'Updating projections...';
-                }, 2500);
-                
+                console.log('Making API call...');
                 const response = await fetch(`${API_BASE}/submit-data?code=${CODE}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ data: data })
                 });
                 const result = await response.json();
+                console.log('API response:', result);
+                
+                // Clear status timers
+                clearTimeout(timer1);
+                clearTimeout(timer2);
+                clearTimeout(timer3);
                 
                 // Show results
                 showImportResults(result);
                 
             } catch (e) {
+                console.error('Submit error:', e);
+                // Clear timers
+                clearTimeout(timer1);
+                clearTimeout(timer2);
+                clearTimeout(timer3);
+                
                 // Show error in results view
-                document.getElementById('paste-loading-view').style.display = 'none';
-                document.getElementById('paste-results-view').style.display = 'block';
+                loadingView.style.display = 'none';
+                resultsView.style.display = 'block';
                 document.getElementById('paste-results-summary').innerHTML = `
                     <div style="text-align: center; color: #ff6b6b;">
                         <p>⚠️ Error processing data</p>
