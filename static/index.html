@@ -1325,33 +1325,91 @@
     <!-- Paste Data Modal -->
     <div id="paste-modal" class="modal">
         <div class="modal-content">
-            <h2>📋 Paste Financial Data</h2>
-            <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px; font-size: 14px;">
-                Paste bank transactions below. Optionally set the current balance.
-            </p>
-            
-            <div style="display: flex; gap: 10px; margin-bottom: 12px; align-items: center;">
-                <label style="color: rgba(255,255,255,0.8); font-size: 14px; white-space: nowrap;">Current Balance:</label>
-                <input type="text" id="current-balance-input" placeholder="e.g. 237000" 
-                    style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); 
-                    background: rgba(255,255,255,0.1); color: white; font-size: 16px;">
-                <button onclick="setCurrentBalance()" style="padding: 10px 15px; border-radius: 8px; 
-                    background: linear-gradient(135deg, #FFB84D, #FF8A65); color: white; border: none; 
-                    font-weight: 600; cursor: pointer; white-space: nowrap;">Set</button>
-            </div>
-            
-            <textarea id="paste-data" placeholder="Paste transactions here...
+            <!-- Input View -->
+            <div id="paste-input-view">
+                <h2>📋 Paste Financial Data</h2>
+                <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px; font-size: 14px;">
+                    Paste bank transactions below. Optionally set the current balance.
+                </p>
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 12px; align-items: center;">
+                    <label style="color: rgba(255,255,255,0.8); font-size: 14px; white-space: nowrap;">Current Balance:</label>
+                    <input type="text" id="current-balance-input" placeholder="e.g. 237000" 
+                        style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); 
+                        background: rgba(255,255,255,0.1); color: white; font-size: 16px;">
+                    <button onclick="setCurrentBalance()" style="padding: 10px 15px; border-radius: 8px; 
+                        background: linear-gradient(135deg, #FFB84D, #FF8A65); color: white; border: none; 
+                        font-weight: 600; cursor: pointer; white-space: nowrap;">Set</button>
+                </div>
+                
+                <textarea id="paste-data" placeholder="Paste transactions here...
 
 Examples:
 - JAN 15, 2026 (date header)
 - Description  $1,234.56 (debit)
 - Deposit     +$5,000.00 (credit)"></textarea>
-            <div class="modal-buttons">
-                <button class="modal-btn cancel" onclick="closePasteModal()">Cancel</button>
-                <button class="modal-btn submit" onclick="submitPastedData()">Submit Data</button>
+                <div class="modal-buttons">
+                    <button class="modal-btn cancel" onclick="closePasteModal()">Cancel</button>
+                    <button class="modal-btn submit" onclick="submitPastedData()">Submit Data</button>
+                </div>
+            </div>
+            
+            <!-- Loading View -->
+            <div id="paste-loading-view" style="display: none; text-align: center; padding: 40px 20px;">
+                <div style="width: 60px; height: 60px; border: 4px solid rgba(255,255,255,0.2); border-top-color: #FFB84D; 
+                    border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+                <h2 style="margin-bottom: 10px;">Processing Data</h2>
+                <p id="paste-loading-status" style="color: rgba(255,255,255,0.7);">Please wait while we update...</p>
+            </div>
+            
+            <!-- Results View -->
+            <div id="paste-results-view" style="display: none;">
+                <h2 style="text-align: center; margin-bottom: 20px;">✅ Import Complete</h2>
+                <div id="paste-results-summary" style="margin-bottom: 20px;"></div>
+                <div id="paste-results-categories" style="max-height: 250px; overflow-y: auto; margin-bottom: 20px;"></div>
+                <div class="modal-buttons">
+                    <button class="modal-btn submit" onclick="finishImport()" style="width: 100%;">View Updated Dashboard</button>
+                </div>
             </div>
         </div>
     </div>
+    
+    <style>
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .category-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .category-name {
+            font-size: 14px;
+            color: rgba(255,255,255,0.9);
+        }
+        .category-count {
+            font-size: 12px;
+            color: rgba(255,255,255,0.5);
+        }
+        .category-amount {
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .category-amount.credit {
+            background: rgba(76, 175, 80, 0.3);
+            color: #4CAF50;
+        }
+        .category-amount.debit {
+            background: rgba(139, 0, 0, 0.3);
+            color: #ff6b6b;
+        }
+    </style>
     
     <!-- Update Confirmation Modal -->
     <div id="update-modal" class="modal">
@@ -2134,6 +2192,10 @@ Examples:
         function closePasteModal() {
             document.getElementById('paste-modal').classList.remove('active');
             document.getElementById('paste-data').value = '';
+            // Reset to input view
+            document.getElementById('paste-input-view').style.display = 'block';
+            document.getElementById('paste-loading-view').style.display = 'none';
+            document.getElementById('paste-results-view').style.display = 'none';
             document.getElementById('current-balance-input').value = '';
         }
         
@@ -2190,15 +2252,27 @@ Examples:
                 return;
             }
             
-            closePasteModal();
-            
-            const chat = document.getElementById('chat');
-            chat.innerHTML += `<div class="message user">📋 Submitted data for processing...</div>`;
-            
-            const loadingId = Date.now();
-            chat.innerHTML += `<div class="message bot" id="loading-${loadingId}"><div class="loading"></div> Processing data...</div>`;
+            // Switch to loading view
+            document.getElementById('paste-input-view').style.display = 'none';
+            document.getElementById('paste-loading-view').style.display = 'block';
+            document.getElementById('paste-results-view').style.display = 'none';
+            document.getElementById('paste-loading-status').textContent = 'Parsing transactions...';
             
             try {
+                // Update status as we go
+                setTimeout(() => {
+                    const status = document.getElementById('paste-loading-status');
+                    if (status) status.textContent = 'Checking for duplicates...';
+                }, 500);
+                setTimeout(() => {
+                    const status = document.getElementById('paste-loading-status');
+                    if (status) status.textContent = 'Categorizing transactions...';
+                }, 1500);
+                setTimeout(() => {
+                    const status = document.getElementById('paste-loading-status');
+                    if (status) status.textContent = 'Updating projections...';
+                }, 2500);
+                
                 const response = await fetch(`${API_BASE}/submit-data?code=${CODE}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2206,12 +2280,80 @@ Examples:
                 });
                 const result = await response.json();
                 
-                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">${result.message}</div>`;
+                // Show results
+                showImportResults(result);
+                
             } catch (e) {
-                document.getElementById(`loading-${loadingId}`).innerHTML = `<div class="answer">Data submitted! I'll process it and update projections.</div>`;
+                // Show error in results view
+                document.getElementById('paste-loading-view').style.display = 'none';
+                document.getElementById('paste-results-view').style.display = 'block';
+                document.getElementById('paste-results-summary').innerHTML = `
+                    <div style="text-align: center; color: #ff6b6b;">
+                        <p>⚠️ Error processing data</p>
+                        <p style="font-size: 12px;">${e.message || 'Please try again'}</p>
+                    </div>
+                `;
+                document.getElementById('paste-results-categories').innerHTML = '';
             }
+        }
+        
+        function showImportResults(result) {
+            document.getElementById('paste-loading-view').style.display = 'none';
+            document.getElementById('paste-results-view').style.display = 'block';
             
-            chat.scrollTop = chat.scrollHeight;
+            // Summary
+            const summaryHtml = `
+                <div style="display: flex; gap: 15px; justify-content: center; margin-bottom: 15px;">
+                    <div style="text-align: center; padding: 15px 25px; background: rgba(76, 175, 80, 0.2); border-radius: 12px;">
+                        <div style="font-size: 28px; font-weight: 700; color: #4CAF50;">${result.added || 0}</div>
+                        <div style="font-size: 12px; color: rgba(255,255,255,0.6);">New Transactions</div>
+                    </div>
+                    <div style="text-align: center; padding: 15px 25px; background: rgba(255,255,255,0.1); border-radius: 12px;">
+                        <div style="font-size: 28px; font-weight: 700;">${result.skipped || 0}</div>
+                        <div style="font-size: 12px; color: rgba(255,255,255,0.6);">Duplicates Skipped</div>
+                    </div>
+                </div>
+                <div style="text-align: center; padding: 12px; background: linear-gradient(135deg, rgba(255,184,77,0.3), rgba(255,138,101,0.3)); border-radius: 10px;">
+                    <span style="font-size: 12px; color: rgba(255,255,255,0.7);">Updated Balance:</span>
+                    <span style="font-size: 18px; font-weight: 700; margin-left: 8px;">$${(result.latest_balance || 0).toLocaleString()}</span>
+                </div>
+            `;
+            document.getElementById('paste-results-summary').innerHTML = summaryHtml;
+            
+            // Categories
+            let categoriesHtml = '';
+            if (result.categories && result.categories.length > 0) {
+                categoriesHtml = '<div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px;">Transaction Categories</div>';
+                for (const cat of result.categories) {
+                    const isCredit = cat.type === 'credit';
+                    const sign = isCredit ? '+' : '-';
+                    const absTotal = Math.abs(cat.total);
+                    categoriesHtml += `
+                        <div class="category-row">
+                            <div>
+                                <div class="category-name">${cat.name}</div>
+                                <div class="category-count">${cat.count} transaction${cat.count !== 1 ? 's' : ''}</div>
+                            </div>
+                            <div class="category-amount ${cat.type}">${sign}$${absTotal.toLocaleString()}</div>
+                        </div>
+                    `;
+                }
+            }
+            document.getElementById('paste-results-categories').innerHTML = categoriesHtml;
+        }
+        
+        function finishImport() {
+            // Reset modal state
+            document.getElementById('paste-input-view').style.display = 'block';
+            document.getElementById('paste-loading-view').style.display = 'none';
+            document.getElementById('paste-results-view').style.display = 'none';
+            document.getElementById('paste-data').value = '';
+            
+            // Close modal
+            closePasteModal();
+            
+            // Refresh dashboard data
+            loadStatus();
         }
         
         function openUpdateModal() {
