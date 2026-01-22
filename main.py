@@ -351,9 +351,9 @@ def parse_bank_data(raw_data: str) -> list:
     """Parse bank transaction data from various formats including messy web-copied data.
     
     Handles:
-    - Tab-separated format: Date\tDescription\tDebit\tCredit\tBalance
-    - Web-copied format with date headers like "JAN 13, 2026 (17)"
-    - Format without dates: defaults to today, looks for descriptions + amounts
+    - Tab-separated format: Description\tDebit\tCredit\tBalance (with date headers)
+    - Web-copied format with date headers like "JAN 13, 2026 (31)"
+    - Multi-line descriptions followed by amount on separate line
     
     Date headers set the date for all following transactions until the next header.
     """
@@ -361,52 +361,130 @@ def parse_bank_data(raw_data: str) -> list:
     transactions = []
     current_date = now_pacific()  # Default to today if no date header found
     
-    # First try tab-separated format
+    # Patterns
+    date_pattern = re.compile(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s+(\d{4})', re.IGNORECASE)
+    amount_pattern = re.compile(r'^-?[\d,]+\.\d{2}$')
+    months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+             'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+    
+    # First check if this is tab-separated format WITH dates in first column
+    tab_with_dates = []
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
-        # Try tab-separated format: Date\tDescription\tDebit\tCredit\tBalance
         parts = line.split('\t')
         if len(parts) >= 5:
-            try:
-                date_str = parts[0].strip()
-                desc = parts[1].strip()
-                debit = parts[2].strip().replace(',', '').replace('$', '')
-                credit = parts[3].strip().replace(',', '').replace('$', '')
-                balance = parts[4].strip().replace(',', '').replace('$', '')
-                
-                # Parse date
-                date = None
-                for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y', '%m-%d-%Y']:
-                    try:
-                        date = datetime.strptime(date_str, fmt)
-                        break
-                    except:
-                        continue
-                
-                if date:
-                    transactions.append({
+            date_str = parts[0].strip()
+            # Try to parse as date
+            for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y', '%m-%d-%Y']:
+                try:
+                    date = datetime.strptime(date_str, fmt)
+                    desc = parts[1].strip()
+                    debit = parts[2].strip().replace(',', '').replace('$', '')
+                    credit = parts[3].strip().replace(',', '').replace('$', '')
+                    balance = parts[4].strip().replace(',', '').replace('$', '')
+                    tab_with_dates.append({
                         'date': date,
                         'description': desc,
                         'debit': float(debit) if debit else 0,
                         'credit': float(credit) if credit else 0,
                         'balance': float(balance) if balance else 0
                     })
-            except Exception as e:
+                    break
+                except:
+                    continue
+    
+    if tab_with_dates:
+        return tab_with_dates
+    
+    # Check for tab-separated format WITHOUT dates (Description\tDebit\t\tCredit\tBalance)
+    # This format has date headers on separate lines
+    tab_transactions = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Check for date header first
+        date_match = date_pattern.search(line)
+        if date_match:
+            month_str = date_match.group(1).upper()
+            day = int(date_match.group(2))
+            year = int(date_match.group(3))
+            current_date = datetime(year, months[month_str], day)
+            continue
+        
+        # Try tab-separated: Description\tDebit\t\tCredit\tBalance or Description\tDebit\tCredit\tBalance
+        parts = line.split('\t')
+        if len(parts) >= 3:
+            # Find description (first non-empty part)
+            desc = parts[0].strip()
+            if not desc:
                 continue
+            
+            # Look for numeric values in remaining parts
+            amounts = []
+            for p in parts[1:]:
+                p = p.strip().replace(',', '').replace('$', '')
+                if p and re.match(r'^-?[\d]+\.?\d*$', p):
+                    try:
+                        amounts.append(float(p))
+                    except:
+                        pass
+            
+            if amounts:
+                # Format: Desc, Debit (empty or value), Credit (empty or value), Balance
+                # If 3+ amounts: likely [debit, credit, balance] or variations
+                # If 2 amounts: could be [debit, balance] or [credit, balance]
+                # If 1 amount: could be debit or credit based on sign/description
+                
+                debit = 0
+                credit = 0
+                balance = 0
+                
+                if len(amounts) >= 3:
+                    # Assume: debit, credit, balance (some may be 0)
+                    debit = amounts[0] if amounts[0] > 0 else 0
+                    credit = amounts[1] if amounts[1] > 0 else 0
+                    balance = amounts[2]
+                elif len(amounts) == 2:
+                    # Could be [amount, balance]
+                    # Determine debit vs credit from sign or keywords
+                    amt = amounts[0]
+                    balance = amounts[1]
+                    if amt < 0 or 'CHECK' in desc.upper() or 'DEBIT' in desc.upper():
+                        debit = abs(amt)
+                    else:
+                        credit = amt
+                elif len(amounts) == 1:
+                    amt = amounts[0]
+                    if amt < 0 or 'CHECK' in desc.upper() or 'DEBIT' in desc.upper():
+                        debit = abs(amt)
+                    else:
+                        credit = amt
+                
+                if debit > 0 or credit > 0:
+                    tab_transactions.append({
+                        'date': current_date,
+                        'description': desc,
+                        'debit': debit,
+                        'credit': credit,
+                        'balance': balance
+                    })
     
-    # If tab-separated worked, return those
-    if transactions:
-        return transactions
+    if tab_transactions:
+        return tab_transactions
     
-    # Parse web-copied format with date headers like "JAN 13, 2026 (17)"
-    # Format: multi-line descriptions followed by amount, then "Pending" or nothing
-    date_pattern = re.compile(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s+(\d{4})', re.IGNORECASE)
-    amount_pattern = re.compile(r'^-?[\d,]+\.\d{2}$')
-    months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-             'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+    # Parse web-copied format with multi-line descriptions followed by amount
+    # Format:
+    # JAN 21, 2026 (31)
+    # E-DEPOSIT 
+    # 1
+    # 16,826.00
+    # CHECK 
+    # 55866
+    # -182.76
     
     desc_lines = []
     
@@ -415,11 +493,11 @@ def parse_bank_data(raw_data: str) -> list:
         if not line:
             continue
         
-        # Skip "Pending" lines
-        if line.lower() == 'pending':
+        # Skip "Pending" lines and header text
+        if line.lower() in ['pending', 'by descriptionby serial number', 'by description', 'by serial number']:
             continue
         
-        # Check for date header
+        # Check for date header (e.g., "JAN 21, 2026 (31)")
         date_match = date_pattern.search(line)
         if date_match:
             month_str = date_match.group(1).upper()
@@ -447,12 +525,7 @@ def parse_bank_data(raw_data: str) -> list:
             desc_lines = []  # Reset for next transaction
             continue
         
-        # Skip CHECK number-only lines (like "11858" after "CHECK")
-        if line.isdigit() and desc_lines and desc_lines[-1].upper() in ['CHECK', 'E-DEPOSIT']:
-            desc_lines.append(line)  # Include check number in description
-            continue
-        
-        # This is part of the description
+        # This is a description line - accumulate it
         desc_lines.append(line)
     
     # If still no transactions, try simple format: "Description Amount" or "Description -Amount"
