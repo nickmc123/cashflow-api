@@ -1221,9 +1221,14 @@ async def get_transactions(
 # Projection generators
 # Special transactions calendar
 SPECIAL_TRANSACTIONS = {
-    # Expected extra income - late January (MVW wire already hit Jan 20 @ $20,141)
+    # CC Deposits from Authorize.Net settlements (above daily baseline)
+    # Jan 26 settlement: $24,256 → deposits Jan 28 (vs ~$16K baseline = +$8K extra)
+    # Jan 27 settlement: $27,048 → deposits Jan 29 (vs ~$16K baseline = +$11K extra)
     "2026-01-28": [
-        {"type": "income", "amount": 30000, "desc": "Expected Extra Income"},
+        {"type": "income", "amount": 8000, "desc": "CC Deposits (Above Baseline - Jan 26 settlement $24K)"},
+    ],
+    "2026-01-29": [
+        {"type": "income", "amount": 11000, "desc": "CC Deposits (Above Baseline - Jan 27 settlement $27K)"},
     ],
     
     # Jan 21 - Remaining items from Jan 20 that haven't cleared yet + outstanding CC deposits
@@ -1234,16 +1239,19 @@ SPECIAL_TRANSACTIONS = {
         {"type": "other", "amount": -38000, "desc": "TM Travel"},
         {"type": "comms_execs", "amount": -14000, "desc": "Comms & Execs (Outstanding)"},
     ],
-    "2026-01-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
-    # Feb 2: Comms BOM + Blue Shield + ADP (Feb 1 is Sunday)
+    # AmEx payments for beginning of Feb ($79K + $45K = $124K total, split across days)
     "2026-02-02": [
+        {"type": "amex", "amount": -79000, "desc": "AmEx Payment #1"},
         {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
         {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
         {"type": "income", "amount": 15000, "desc": "BOM Spike (Reduced)"},
         {"type": "income", "amount": 30000, "desc": "Expected Extra Income"},
     ],
-    "2026-02-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-02-03": [
+        {"type": "amex", "amount": -45000, "desc": "AmEx Payment #2"},
+        {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
+    ],
     # Feb 16: Comms MID + ADP (Feb 15 is Sunday, Feb 16 is Presidents Day but not a bank holiday for checks)
     "2026-02-16": [
         {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
