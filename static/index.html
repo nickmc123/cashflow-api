@@ -1313,7 +1313,12 @@
         
         <div class="action-buttons">
             <button class="action-btn" onclick="openPasteModal()">📋 Paste Data</button>
-            <button class="action-btn" onclick="showTransactions()">📄 Recent Transactions</button>
+            <button class="action-btn" onclick="triggerCsvImport()">📁 Import CSV</button>
+        </div>
+        <input type="file" id="csv-file-input" accept=".csv" style="display: none;" onchange="handleCsvFile(event)">
+        
+        <div class="action-buttons" style="margin-top: 10px;">
+            <button class="action-btn" onclick="showTransactions()" style="flex: none; width: 100%;">📄 Recent Transactions</button>
         </div>
         
         <div class="action-buttons" style="margin-top: 10px;">
@@ -2377,6 +2382,158 @@ Examples:
             
             // Refresh dashboard data
             loadStatus();
+        }
+        
+        // CSV Import Functions
+        function triggerCsvImport() {
+            document.getElementById('csv-file-input').click();
+        }
+        
+        function handleCsvFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const csvText = e.target.result;
+                const parsedData = parseCsvToTransactionText(csvText);
+                
+                // Open paste modal and populate with parsed data
+                openPasteModal();
+                document.getElementById('paste-data').value = parsedData;
+            };
+            reader.readAsText(file);
+            
+            // Reset file input so same file can be selected again
+            event.target.value = '';
+        }
+        
+        function parseCsvToTransactionText(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) return '';
+            
+            // Parse header to find column indices
+            const header = parseCSVLine(lines[0]);
+            const dateIdx = header.findIndex(h => h.toLowerCase().includes('date') && h.toLowerCase().includes('post'));
+            const descIdx = header.findIndex(h => h.toLowerCase().includes('transaction') || h.toLowerCase().includes('description'));
+            const debitIdx = header.findIndex(h => h.toLowerCase() === 'debit');
+            const creditIdx = header.findIndex(h => h.toLowerCase() === 'credit');
+            const balanceIdx = header.findIndex(h => h.toLowerCase().includes('balance'));
+            
+            // If columns not found, try alternative detection
+            const amountIdx = header.findIndex(h => h.toLowerCase().includes('amount'));
+            
+            let output = [];
+            let currentDate = '';
+            let latestBalance = null;
+            
+            for (let i = 1; i < lines.length; i++) {
+                const row = parseCSVLine(lines[i]);
+                if (row.length < 3) continue;
+                
+                // Get date
+                let date = dateIdx >= 0 ? row[dateIdx] : '';
+                if (date && date !== currentDate) {
+                    currentDate = date;
+                    // Format date as header (e.g., "JAN 15, 2026")
+                    const formattedDate = formatDateHeader(date);
+                    if (formattedDate) {
+                        output.push('');
+                        output.push(formattedDate);
+                    }
+                }
+                
+                // Get description
+                let desc = descIdx >= 0 ? row[descIdx] : row[1] || '';
+                desc = desc.replace(/"/g, '').trim();
+                
+                // Get amount (debit/credit)
+                let amount = 0;
+                let isCredit = false;
+                
+                if (debitIdx >= 0 && creditIdx >= 0) {
+                    const debit = parseAmount(row[debitIdx]);
+                    const credit = parseAmount(row[creditIdx]);
+                    if (credit > 0) {
+                        amount = credit;
+                        isCredit = true;
+                    } else if (debit > 0) {
+                        amount = debit;
+                        isCredit = false;
+                    }
+                } else if (amountIdx >= 0) {
+                    amount = parseAmount(row[amountIdx]);
+                    isCredit = amount > 0;
+                    amount = Math.abs(amount);
+                }
+                
+                // Get balance for latest
+                if (balanceIdx >= 0) {
+                    const bal = parseAmount(row[balanceIdx]);
+                    if (bal > 0) latestBalance = bal;
+                }
+                
+                // Format transaction line
+                if (desc && amount > 0) {
+                    const sign = isCredit ? '+' : '-';
+                    output.push(`${desc}\t${sign}$${amount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`);
+                }
+            }
+            
+            // Add balance hint at the top if found
+            let result = output.join('\n');
+            if (latestBalance) {
+                result = `Balance: $${latestBalance.toLocaleString()}\n\n` + result;
+            }
+            
+            return result;
+        }
+        
+        function parseCSVLine(line) {
+            // Handle CSV with quoted fields
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current.trim());
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current.trim());
+            return result;
+        }
+        
+        function parseAmount(str) {
+            if (!str) return 0;
+            // Remove $, commas, and whitespace, handle parentheses for negative
+            let clean = str.replace(/[$,\s]/g, '');
+            if (clean.startsWith('(') && clean.endsWith(')')) {
+                clean = '-' + clean.slice(1, -1);
+            }
+            return parseFloat(clean) || 0;
+        }
+        
+        function formatDateHeader(dateStr) {
+            if (!dateStr) return null;
+            try {
+                // Handle MM/DD/YYYY format
+                const parts = dateStr.split('/');
+                if (parts.length === 3) {
+                    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+                    const month = parseInt(parts[0]) - 1;
+                    const day = parseInt(parts[1]);
+                    const year = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+                    return `${months[month]} ${day}, ${year}`;
+                }
+            } catch (e) {}
+            return dateStr;
         }
         
         function openUpdateModal() {
