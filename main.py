@@ -38,6 +38,10 @@ ACCESS_CODE = "cflownk"
 # Webhook URL for triggering updates
 WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=739e742528fc953b33f7fddb05705e9f"
 
+# CasaXAI Gateway for AI-powered Q&A
+CASAXAI_URL = os.environ.get("CASAXAI_URL", "https://ai.casaxai.com")
+CASAXAI_API_KEY = os.environ.get("CASAXAI_API_KEY", "")
+
 # Database connection
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -2079,7 +2083,68 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
             })
         return {"type": "answer", "text": "Refreshing data from Authorize.Net... Check back in a minute!"}
     
-    # Unknown - send to webhook
+    # Unknown - route to CasaXAI for intelligent response
+    if CASAXAI_API_KEY:
+        try:
+            # Build context with current cash flow data
+            balance = get_today_balance()
+            forecast = get_forecast_from_db()
+            
+            # Get upcoming highs/lows
+            sorted_dates = sorted(forecast.keys())
+            context_lines = [
+                f"Current balance: ${balance:,.0f}",
+                "Upcoming forecast:"
+            ]
+            for d in sorted_dates[:7]:
+                entry = forecast[d]
+                context_lines.append(f"  {d}: ${entry['balance']:,.0f}")
+            
+            system_prompt = f"""You are a helpful cash flow assistant for Casablanca Express travel company.
+Answer questions about cash flow, balances, and projections based on this data:
+
+{chr(10).join(context_lines)}
+
+Key info:
+- Payroll: ~$85K twice monthly (2nd and 17th)
+- AmEx: ~$130K twice monthly (mid-month and end-of-month)
+- Daily income: ~$32K (CC deposits + check deposits)
+- Daily ops: ~$9K (refund checks)
+
+Be concise and helpful. Use $ amounts with commas."""
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{CASAXAI_URL}/chat",
+                    headers={"X-API-Key": CASAXAI_API_KEY},
+                    json={
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question}
+                        ],
+                        "model": "auto"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Handle different response formats
+                    if "choices" in data and data["choices"]:
+                        ai_response = data["choices"][0].get("message", {}).get("content", "")
+                    elif "content" in data:
+                        ai_response = data["content"]
+                    elif "response" in data:
+                        ai_response = data["response"]
+                    else:
+                        ai_response = str(data)
+                    
+                    if ai_response:
+                        return {"type": "answer", "text": ai_response}
+        except Exception as e:
+            # Log error but don't fail - fall back to webhook
+            print(f"CasaXAI error: {e}")
+    
+    # Fallback - send to webhook for manual follow-up
     async with httpx.AsyncClient() as client:
         await client.post(WEBHOOK_URL, json={
             "type": "unknown_question",
