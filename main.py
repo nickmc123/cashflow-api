@@ -40,7 +40,7 @@ WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=***REMOVED***
 
 # CasaXAI Gateway for AI-powered Q&A
 CASAXAI_URL = os.environ.get("CASAXAI_URL", "https://ai.casaxai.com")
-CASAXAI_API_KEY = os.environ.get("CASAXAI_API_KEY", "")
+CASAXAI_API_KEY = os.environ.get("CASAXAI_API_KEY", "***REMOVED***")
 
 # Database connection
 DATABASE_URL = os.environ.get("DATABASE_URL")
