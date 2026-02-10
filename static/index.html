@@ -1311,6 +1311,10 @@
             <button class="quick-btn" onclick="showPaymentsPage()">📅 Payments</button>
         </div>
         
+        <div class="action-buttons" style="margin-top: 10px;">
+            <button class="action-btn" onclick="openUpdateModal()" style="flex: none; width: 100%; background: linear-gradient(135deg, #4CAF50, #45a049);">🔄 Update Bank Transactions</button>
+        </div>
+        
         <div class="action-buttons">
             <button class="action-btn" onclick="openPasteModal()">📋 Paste Data</button>
             <button class="action-btn" onclick="triggerCsvImport()">📁 Import CSV</button>
@@ -1419,10 +1423,15 @@ Examples:
     <!-- Update Confirmation Modal -->
     <div id="update-modal" class="modal">
         <div class="modal-content">
-            <h2>🔄 Update from Authorize.net</h2>
-            <p style="color: rgba(255,255,255,0.6); margin-bottom: 20px; font-size: 14px;">
-                This will pull the latest settlement reports from Authorize.net and update the cash flow projections.
+            <h2>🔄 Update Bank Transactions</h2>
+            <p style="color: rgba(255,255,255,0.6); margin-bottom: 15px; font-size: 14px;">
+                This will pull the latest transactions from City National Bank and update your cash flow projections.
             </p>
+            <div style="background: rgba(255,184,77,0.2); border-radius: 10px; padding: 12px; margin-bottom: 20px;">
+                <p style="color: #FFB84D; font-size: 13px; margin: 0;">
+                    ⏱️ <strong>Please allow up to 5 minutes</strong> for the update to complete. You'll see the new transactions when you refresh the dashboard.
+                </p>
+            </div>
             <div class="modal-buttons">
                 <button class="modal-btn cancel" onclick="closeUpdateModal()">Cancel</button>
                 <button class="modal-btn submit" onclick="confirmUpdate()">Update Now</button>
