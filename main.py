@@ -36,7 +36,7 @@ app.add_middleware(
 ACCESS_CODE = "***REMOVED***"
 
 # Webhook URL for triggering updates
-WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=***REMOVED***"
+WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=a6d9c531f9fb78ced66824b842f7462a"
 
 # CasaXAI Gateway for AI-powered Q&A
 CASAXAI_URL = os.environ.get("CASAXAI_URL", "https://ai.casaxai.com")
