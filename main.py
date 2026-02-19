@@ -36,7 +36,7 @@ app.add_middleware(
 ACCESS_CODE = "cflownk"
 
 # Webhook URL for triggering updates
-WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=a6d9c531f9fb78ced66824b842f7462a"
+WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=739e742528fc953b33f7fddb05705e9f"
 
 # CasaXAI Gateway for AI-powered Q&A
 CASAXAI_URL = os.environ.get("CASAXAI_URL", "https://ai.casaxai.com")
@@ -355,6 +355,7 @@ def parse_bank_data(raw_data: str) -> list:
     """Parse bank transaction data from various formats including messy web-copied data.
     
     Handles:
+    - City National Bank CSV format (comma-separated with headers)
     - Tab-separated format: Description\tDebit\tCredit\tBalance (with date headers)
     - Web-copied format with date headers like "JAN 13, 2026 (31)"
     - Multi-line descriptions followed by amount on separate line
@@ -371,7 +372,52 @@ def parse_bank_data(raw_data: str) -> list:
     months = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
              'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
     
-    # First check if this is tab-separated format WITH dates in first column
+    # ===== CHECK FOR CSV FORMAT (City National Bank) =====
+    # Detect by checking if first line contains comma-separated headers
+    first_line = lines[0].strip() if lines else ''
+    if 'Post Date' in first_line and ',' in first_line:
+        import csv as csv_module
+        from io import StringIO
+        reader = csv_module.DictReader(StringIO(raw_data))
+        csv_transactions = []
+        for row in reader:
+            date_str = row.get('Post Date', '').strip()
+            # Use Transaction Detail for full description, fallback to Transaction Name
+            desc = row.get('Transaction Detail', '').strip() or row.get('Transaction Name - BAI', '').strip()
+            amount_str = row.get('Amount', '0').strip().replace(',', '')
+            dc = row.get('Debit/Credit', '').strip()
+            
+            try:
+                amount = float(amount_str)
+            except:
+                continue
+            
+            # Parse date
+            parsed_date = None
+            for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y']:
+                try:
+                    parsed_date = datetime.strptime(date_str, fmt)
+                    break
+                except:
+                    continue
+            if not parsed_date:
+                continue
+            
+            debit = abs(amount) if dc == 'Debit' or amount < 0 else 0
+            credit = abs(amount) if dc == 'Credit' and amount >= 0 else 0
+            
+            csv_transactions.append({
+                'date': parsed_date,
+                'description': desc,
+                'debit': debit,
+                'credit': credit,
+                'balance': 0
+            })
+        
+        if csv_transactions:
+            return csv_transactions
+    
+    # ===== CHECK FOR TAB-SEPARATED FORMAT WITH DATES =====
     tab_with_dates = []
     for line in lines:
         line = line.strip()
