@@ -214,6 +214,10 @@ def init_db():
             debit DECIMAL(12,2),
             credit DECIMAL(12,2),
             balance DECIMAL(12,2),
+            category TEXT,
+            custom_category TEXT,
+            check_number TEXT,
+            payee TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -224,6 +228,22 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS custom_category_rules (
+            id SERIAL PRIMARY KEY,
+            pattern TEXT NOT NULL,
+            category TEXT NOT NULL,
+            match_type TEXT DEFAULT 'contains',
+            priority INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Migration: add new columns if they don't exist
+    for col, col_type in [('category', 'TEXT'), ('custom_category', 'TEXT'), ('check_number', 'TEXT'), ('payee', 'TEXT')]:
+        try:
+            cur.execute(f"ALTER TABLE bank_transactions ADD COLUMN {col} {col_type}")
+        except:
+            conn.rollback()
     conn.commit()
     cur.close()
     conn.close()
@@ -384,6 +404,11 @@ def parse_bank_data(raw_data: str) -> list:
             date_str = row.get('Post Date', '').strip()
             # Use Transaction Detail for full description, fallback to Transaction Name
             desc = row.get('Transaction Detail', '').strip() or row.get('Transaction Name - BAI', '').strip()
+            # Capture check number from Customer Reference for check transactions
+            customer_ref = row.get('Customer Reference', '').strip()
+            txn_name = row.get('Transaction Name - BAI', '').strip()
+            if customer_ref and 'Check' in txn_name:
+                desc = f"CHECK {customer_ref} {desc}".strip()
             amount_str = row.get('Amount', '0').strip().replace(',', '')
             dc = row.get('Debit/Credit', '').strip()
             
@@ -621,9 +646,63 @@ def get_existing_transactions(conn, date: datetime.date) -> set:
     cur.close()
     return existing
 
+def get_custom_category_rules():
+    """Get custom category rules from database"""
+    conn = get_db()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT pattern, category, match_type FROM custom_category_rules ORDER BY priority DESC, id")
+        rules = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rules
+    except:
+        conn.close()
+        return []
+
+
+def has_refund_code(desc: str) -> bool:
+    """Check if description contains a refund code pattern: 2-6 letters followed by a 6-digit number"""
+    import re
+    if not desc:
+        return False
+    # Match standalone codes: 2-6 uppercase letters followed by optional space and exactly 6 digits
+    return bool(re.search(r'\b[A-Z]{2,6}\s?\d{6}\b', desc.upper()))
+
+
 def categorize_transaction(desc: str, debit: float, credit: float) -> str:
-    """Categorize a transaction based on description and type"""
+    """Categorize a transaction based on description and type.
+    Checks custom rules first, then refund code pattern, then built-in rules."""
     desc_upper = desc.upper() if desc else ""
+    
+    # Check custom category rules first
+    try:
+        rules = get_custom_category_rules()
+        for rule in rules:
+            pattern = rule['pattern'].upper()
+            match_type = rule.get('match_type', 'contains')
+            if match_type == 'exact' and desc_upper == pattern:
+                return rule['category']
+            elif match_type == 'startswith' and desc_upper.startswith(pattern):
+                return rule['category']
+            elif match_type == 'regex':
+                import re
+                if re.search(pattern, desc_upper):
+                    return rule['category']
+            elif pattern in desc_upper:  # default: contains
+                return rule['category']
+    except:
+        pass
+    
+    # Check for refund code pattern (2-6 letters + 6 digit number in memo)
+    if has_refund_code(desc_upper):
+        # Don't override known categories like CC deposits, payroll, etc.
+        # Only apply to transactions that would otherwise be uncategorized
+        known_prefixes = ['PAYMENTECH', 'AMERICAN EXPRESS', 'CMS', 'ADP', 'MVW']
+        if not any(kp in desc_upper for kp in known_prefixes):
+            return 'Refund'
     
     if credit > 0:
         # Income categories
@@ -726,11 +805,20 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         if tx_balance and tx_balance > 0:
             latest_balance = tx_balance
         
+        # Auto-categorize and extract check number
+        tx_category = categorize_transaction(tx['description'], tx['debit'], tx['credit'])
+        tx_check_num = None
+        if tx['description']:
+            import re
+            check_match = re.match(r'CHECK\s+(\d+)', tx['description'])
+            if check_match:
+                tx_check_num = check_match.group(1)
+        
         # Insert transaction with bank's balance (or 0 if not available)
         cur.execute("""
-            INSERT INTO bank_transactions (date, description, debit, credit, balance)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx_balance))
+            INSERT INTO bank_transactions (date, description, debit, credit, balance, category, check_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx_balance, tx_category, tx_check_num))
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
@@ -783,6 +871,226 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         "latest_balance": latest_balance,
         "categories": category_summary
     }
+
+
+
+
+@app.patch("/transactions/{transaction_id}")
+async def update_transaction(transaction_id: int, code: str = Query(...), body: dict = {}):
+    """Update a transaction's description, category, payee, or check_number"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor()
+    updates = []
+    params = []
+    
+    for field in ['description', 'custom_category', 'payee', 'check_number']:
+        if field in body:
+            updates.append(f"{field} = %s")
+            params.append(body[field])
+    
+    if not updates:
+        return {"status": "error", "message": "No fields to update. Allowed: description, custom_category, payee, check_number"}
+    
+    params.append(transaction_id)
+    cur.execute(f"UPDATE bank_transactions SET {', '.join(updates)} WHERE id = %s", params)
+    affected = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "updated": affected}
+
+
+@app.post("/transactions/match-payees")
+async def match_payees(code: str = Query(...), body: dict = {}):
+    """Bulk match check transactions to payees using check data.
+    Body: {"checks": [{"check_number": "327188", "payee": "MARCO LUGA", "amount": 500.0, "date": "2026-01-08"}, ...]}
+    Matches by check_number in description, or by date+amount if no check number stored."""
+    verify_code(code)
+    
+    checks = body.get('checks', [])
+    if not checks:
+        return {"status": "error", "message": "No checks provided"}
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    matched = 0
+    unmatched = []
+    
+    for check in checks:
+        check_num = str(check.get('check_number', ''))
+        payee = check.get('payee', '')
+        amount = abs(float(check.get('amount', 0)))
+        date = check.get('date', '')
+        
+        if not check_num or not payee:
+            continue
+        
+        # Try matching by check_number column first
+        cur.execute("""
+            UPDATE bank_transactions 
+            SET payee = %s, check_number = %s
+            WHERE check_number = %s AND payee IS NULL
+        """, (payee, check_num, check_num))
+        
+        if cur.rowcount > 0:
+            matched += cur.rowcount
+            continue
+        
+        # Try matching by description containing check number
+        cur.execute("""
+            UPDATE bank_transactions 
+            SET payee = %s, check_number = %s
+            WHERE description LIKE %s AND payee IS NULL
+        """, (payee, check_num, f"%CHECK%{check_num}%"))
+        
+        if cur.rowcount > 0:
+            matched += cur.rowcount
+            continue
+        
+        # Try matching by description containing 'CHECK' + date + amount
+        if date and amount > 0:
+            # Parse date
+            parsed_date = None
+            for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y']:
+                try:
+                    from datetime import datetime
+                    parsed_date = datetime.strptime(date, fmt).date()
+                    break
+                except:
+                    continue
+            
+            if parsed_date:
+                cur.execute("""
+                    UPDATE bank_transactions 
+                    SET payee = %s, check_number = %s
+                    WHERE date = %s AND debit = %s 
+                    AND UPPER(description) LIKE '%%CHECK%%' 
+                    AND payee IS NULL
+                """, (payee, check_num, parsed_date, amount))
+                
+                if cur.rowcount > 0:
+                    matched += cur.rowcount
+                    continue
+        
+        unmatched.append(check_num)
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "matched": matched,
+        "unmatched_count": len(unmatched),
+        "unmatched_checks": unmatched[:50]
+    }
+
+
+@app.get("/category-rules")
+async def get_category_rules(code: str = Query(...)):
+    """Get all custom category rules"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"rules": []}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT id, pattern, category, match_type, priority FROM custom_category_rules ORDER BY priority DESC, id")
+    rules = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    
+    return {"rules": rules}
+
+
+@app.post("/category-rules")
+async def add_category_rule(code: str = Query(...), body: dict = {}):
+    """Add a custom category rule.
+    Body: {"pattern": "SOME TEXT", "category": "My Category", "match_type": "contains|exact|startswith|regex", "priority": 0}"""
+    verify_code(code)
+    
+    pattern = body.get('pattern', '')
+    category = body.get('category', '')
+    match_type = body.get('match_type', 'contains')
+    priority = body.get('priority', 0)
+    
+    if not pattern or not category:
+        return {"status": "error", "message": "pattern and category are required"}
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO custom_category_rules (pattern, category, match_type, priority)
+        VALUES (%s, %s, %s, %s) RETURNING id
+    """, (pattern, category, match_type, priority))
+    rule_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "id": rule_id}
+
+
+@app.delete("/category-rules/{rule_id}")
+async def delete_category_rule(rule_id: int, code: str = Query(...)):
+    """Delete a custom category rule"""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor()
+    cur.execute("DELETE FROM custom_category_rules WHERE id = %s", (rule_id,))
+    affected = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "deleted": affected}
+
+
+@app.post("/transactions/recategorize")
+async def recategorize_all(code: str = Query(...)):
+    """Recategorize all transactions using current rules. Updates category column."""
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT id, description, debit, credit FROM bank_transactions WHERE custom_category IS NULL")
+    rows = cur.fetchall()
+    
+    updated = 0
+    for row in rows:
+        new_cat = categorize_transaction(
+            row['description'], 
+            float(row['debit']) if row['debit'] else 0, 
+            float(row['credit']) if row['credit'] else 0
+        )
+        cur.execute("UPDATE bank_transactions SET category = %s WHERE id = %s", (new_cat, row['id']))
+        updated += 1
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return {"status": "success", "recategorized": updated}
 
 
 @app.post("/cleanup-transactions")
@@ -1237,7 +1545,7 @@ async def get_transactions(
     
     # Get paginated results
     query = f"""
-        SELECT id, date, description, debit, credit, balance, created_at
+        SELECT id, date, description, debit, credit, balance, category, custom_category, check_number, payee, created_at
         FROM bank_transactions
         {where_clause}
         ORDER BY date DESC, id DESC
@@ -1257,7 +1565,10 @@ async def get_transactions(
             "description": row['description'],
             "debit": float(row['debit']) if row['debit'] else 0,
             "credit": float(row['credit']) if row['credit'] else 0,
-            "balance": float(row['balance']) if row['balance'] else 0
+            "balance": float(row['balance']) if row['balance'] else 0,
+            "category": row.get('custom_category') or row.get('category') or '',
+            "check_number": row.get('check_number') or '',
+            "payee": row.get('payee') or ''
         })
     
     return {
