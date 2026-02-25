@@ -1631,6 +1631,7 @@ SPECIAL_TRANSACTIONS = {
         {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
         {"type": "income", "amount": 60000, "desc": "BOM Spike"},
+        {"type": "income", "amount": 70000, "desc": "CC Charge (Credit Card Processing)"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
     "2026-03-05": [{"type": "income", "amount": 60000, "desc": "Client Revenue Payment"}],
