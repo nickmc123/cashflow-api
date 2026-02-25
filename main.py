@@ -1623,10 +1623,10 @@ SPECIAL_TRANSACTIONS = {
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
         {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
     ],
-    # Feb end-of-month AmEx (Feb 28 is Saturday)
-    "2026-02-28": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
-    # March BOM (Mar 1 is Sunday)
+    # March BOM (Mar 1 is Sunday) + AmEx payments moved from Feb 28
     "2026-03-02": [
+        {"type": "amex", "amount": -91245, "desc": "AmEx Payment #1"},
+        {"type": "amex", "amount": -77073, "desc": "AmEx Payment #2"},
         {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
         {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
@@ -2356,7 +2356,8 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
             {"date": "2026-02-02", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
             {"date": "2026-02-03", "desc": "Payroll Checks", "amount": 60000},
             {"date": "2026-02-17", "desc": "AmEx + Payroll", "amount": 190000},
-            {"date": "2026-02-28", "desc": "AmEx Payment", "amount": 130000},
+            {"date": "2026-03-02", "desc": "AmEx Payment #1", "amount": 91245},
+            {"date": "2026-03-02", "desc": "AmEx Payment #2", "amount": 77073},
             {"date": "2026-03-02", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
             {"date": "2026-03-03", "desc": "Payroll Checks", "amount": 60000},
             {"date": "2026-03-17", "desc": "AmEx + Payroll", "amount": 190000},
