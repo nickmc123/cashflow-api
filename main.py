@@ -1630,11 +1630,9 @@ SPECIAL_TRANSACTIONS = {
         {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
         {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
-        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
-    "2026-03-04": [{"type": "income", "amount": 70000, "desc": "CC Charge Deposit (Credit Card Processing)"}],
-    "2026-03-05": [{"type": "income", "amount": 78000, "desc": "CC Deposit (Credit Card Processing)"}],
+    "2026-03-04": [{"type": "income", "amount": 78000, "desc": "Cert Sales CC Deposit"}],
     "2026-03-16": [
         {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
@@ -1650,7 +1648,6 @@ SPECIAL_TRANSACTIONS = {
     "2026-04-01": [
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
         {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
-        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-04-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-04-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
@@ -1666,7 +1663,6 @@ SPECIAL_TRANSACTIONS = {
     "2026-05-01": [
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
         {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
-        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-05-04": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-05-05": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
@@ -1682,7 +1678,6 @@ SPECIAL_TRANSACTIONS = {
     "2026-06-01": [
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
         {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
-        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-06-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-06-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
@@ -1698,7 +1693,6 @@ SPECIAL_TRANSACTIONS = {
     "2026-07-01": [
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
         {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
-        {"type": "income", "amount": 60000, "desc": "BOM Spike"},
     ],
     "2026-07-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-07-06": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],  # After July 4th
