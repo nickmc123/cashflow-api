@@ -2517,6 +2517,258 @@ async def request_update(code: str = Query(...)):
         })
     return {"status": "requested", "message": "Update request sent"}
 
+# ==========================================
+# STEWART DASHBOARD INTEGRATION API
+# ==========================================
+# Clean endpoints for external dashboard agents
+# Auth: pass code= query param (same as main app)
+
+@app.get("/api/dashboard")
+async def api_dashboard(code: str = Query(...)):
+    """Consolidated dashboard data in one call.
+    Returns: balance, status, key dates, low point, upcoming payments, recent transactions."""
+    verify_code(code)
+    
+    proj = generate_daily_projection(60)
+    today = now_pacific().strftime("%Y-%m-%d")
+    
+    current_balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
+    
+    # Find low point in next 60 days
+    weekday_rows = []
+    for row in proj["rows"]:
+        dt = datetime.strptime(row["iso_date"], "%Y-%m-%d")
+        if dt.weekday() < 5:
+            weekday_rows.append(row)
+    
+    low_point = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+    high_point = max(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+    
+    # Determine status
+    low_bal = low_point["balance"] if low_point else current_balance
+    if low_bal > 100000:
+        status = "HEALTHY"
+    elif low_bal > 50000:
+        status = "OK"
+    else:
+        status = "TIGHT"
+    
+    # Important dates (alternating highs/lows)
+    important_dates = []
+    for i, row in enumerate(weekday_rows):
+        if i == 0 or i == len(weekday_rows) - 1:
+            continue
+        prev_bal = weekday_rows[i-1]["balance"]
+        curr_bal = row["balance"]
+        next_bal = weekday_rows[i+1]["balance"]
+        
+        if curr_bal < prev_bal and curr_bal < next_bal:
+            important_dates.append({
+                "date": row["iso_date"],
+                "display_date": row["date"],
+                "balance": curr_bal,
+                "type": "LOW",
+                "note": row.get("note", "")
+            })
+        elif curr_bal > prev_bal and curr_bal > next_bal:
+            important_dates.append({
+                "date": row["iso_date"],
+                "display_date": row["date"],
+                "balance": curr_bal,
+                "type": "HIGH",
+                "note": row.get("note", "")
+            })
+    
+    important_dates.sort(key=lambda x: x["date"])
+    important_dates = important_dates[:6]
+    
+    # Get upcoming payments (next 30 days)
+    from datetime import date as date_type
+    today_date = date_type.today()
+    upcoming_payments = []
+    for date_str, txns in SPECIAL_TRANSACTIONS.items():
+        if date_str >= today:
+            for txn in txns:
+                if txn["type"] in ["amex", "payroll", "payroll_tax", "comms_execs", "blue_shield"]:
+                    payment_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    days_until = (payment_date - today_date).days
+                    if days_until <= 30:
+                        upcoming_payments.append({
+                            "date": date_str,
+                            "type": txn["type"],
+                            "desc": txn["desc"],
+                            "amount": abs(txn["amount"]),
+                            "days_until": days_until
+                        })
+    upcoming_payments.sort(key=lambda x: x["date"])
+    
+    # Recent transactions (last 10)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT date, description, debit, credit, balance, category FROM bank_transactions ORDER BY date DESC, id DESC LIMIT 10")
+    recent = []
+    for row in cur.fetchall():
+        amount = row[3] if row[3] else -(row[2] if row[2] else 0)
+        recent.append({
+            "date": row[0],
+            "description": row[1][:80],
+            "amount": round(amount, 2),
+            "balance": round(row[4], 2) if row[4] else None,
+            "category": row[5] or ""
+        })
+    conn.close()
+    
+    return {
+        "current_balance": current_balance,
+        "as_of": today,
+        "status": status,
+        "low_point": {
+            "date": low_point["iso_date"],
+            "balance": low_point["balance"],
+            "note": low_point.get("note", "")
+        } if low_point else None,
+        "high_point": {
+            "date": high_point["iso_date"],
+            "balance": high_point["balance"]
+        } if high_point else None,
+        "important_dates": important_dates,
+        "upcoming_payments": upcoming_payments,
+        "recent_transactions": recent,
+        "profit_30day": ROLLING_30_DAY['gross_profit']
+    }
+
+@app.get("/api/projection")
+async def api_projection(
+    code: str = Query(...),
+    type: str = Query("daily", description="daily, weekly, or monthly"),
+    periods: int = Query(30, description="Number of periods (days/weeks/months)")
+):
+    """Get projection data. Type: daily/weekly/monthly. Periods: number of periods."""
+    verify_code(code)
+    
+    if type == "daily":
+        proj = generate_daily_projection(periods)
+    elif type == "weekly":
+        proj = generate_weekly_projection(periods)
+    elif type == "monthly":
+        proj = generate_monthly_projection(periods) if hasattr(globals(), 'generate_monthly_projection') else generate_weekly_projection(periods * 4)
+    else:
+        raise HTTPException(status_code=400, detail="type must be daily, weekly, or monthly")
+    
+    return proj
+
+@app.get("/api/balance")
+async def api_balance(code: str = Query(...)):
+    """Get current balance and date."""
+    verify_code(code)
+    proj = generate_daily_projection(1)
+    balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
+    return {
+        "balance": balance,
+        "as_of": now_pacific().strftime("%Y-%m-%d"),
+        "updated_at": now_pacific().isoformat()
+    }
+
+@app.get("/api/transactions")
+async def api_transactions(
+    code: str = Query(...),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    category: str = Query(None)
+):
+    """Get transactions with filtering."""
+    verify_code(code)
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    where_clauses = []
+    params = []
+    
+    if date_from:
+        where_clauses.append("date >= %s")
+        params.append(date_from)
+    if date_to:
+        where_clauses.append("date <= %s")
+        params.append(date_to)
+    if category:
+        where_clauses.append("category ILIKE %s")
+        params.append(f"%{category}%")
+    
+    where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    
+    cur.execute(f"SELECT COUNT(*) FROM bank_transactions {where_sql}", params)
+    total = cur.fetchone()[0]
+    
+    cur.execute(f"""
+        SELECT date, description, debit, credit, balance, category, check_number 
+        FROM bank_transactions {where_sql}
+        ORDER BY date DESC, id DESC
+        LIMIT %s OFFSET %s
+    """, params + [limit, offset])
+    
+    transactions = []
+    for row in cur.fetchall():
+        amount = row[3] if row[3] else -(row[2] if row[2] else 0)
+        transactions.append({
+            "date": row[0],
+            "description": row[1],
+            "amount": round(amount, 2),
+            "balance": round(row[4], 2) if row[4] else None,
+            "category": row[5] or "",
+            "check_number": row[6] or ""
+        })
+    conn.close()
+    
+    return {
+        "transactions": transactions,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": (offset + limit) < total
+    }
+
+@app.get("/api/payments")
+async def api_payments(code: str = Query(...), days: int = Query(60, ge=1, le=180)):
+    """Get upcoming scheduled payments within N days."""
+    verify_code(code)
+    
+    today = now_pacific().strftime("%Y-%m-%d")
+    from datetime import date as date_type
+    today_date = date_type.today()
+    cutoff = (today_date + timedelta(days=days)).isoformat()
+    
+    payments = []
+    for date_str, txns in SPECIAL_TRANSACTIONS.items():
+        if date_str >= today and date_str <= cutoff:
+            for txn in txns:
+                payment_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                days_until = (payment_date - today_date).days
+                payments.append({
+                    "date": date_str,
+                    "type": txn["type"],
+                    "desc": txn["desc"],
+                    "amount": abs(txn["amount"]),
+                    "days_until": days_until,
+                    "is_expense": txn["amount"] < 0
+                })
+    
+    payments.sort(key=lambda x: x["date"])
+    
+    total_upcoming = sum(p["amount"] for p in payments if p["is_expense"])
+    
+    return {
+        "payments": payments,
+        "total_upcoming_expenses": round(total_upcoming, 2),
+        "period_days": days
+    }
+
+# ==========================================
+# END STEWART DASHBOARD API
+# ==========================================
+
 @app.get("/")
 async def root():
     return FileResponse("static/index.html")
