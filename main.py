@@ -1632,7 +1632,7 @@ SPECIAL_TRANSACTIONS = {
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
-    "2026-03-04": [{"type": "income", "amount": 78000, "desc": "Cert Sales CC Deposit"}],
+    "2026-03-06": [{"type": "income", "amount": 81380, "desc": "Cert Sales CC Deposit ($81,380 - Expected Friday)"}],
     "2026-03-16": [
         {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
