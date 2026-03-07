@@ -1621,7 +1621,8 @@ SPECIAL_TRANSACTIONS = {
     # Feb 17: Payroll + AmEx
     "2026-02-17": [
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
-        {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
+        {"type": "amex", "amount": -83000, "desc": "AmEx Payment #1"},
+        {"type": "amex", "amount": -57000, "desc": "AmEx Payment #2"},
     ],
     # March BOM (Mar 1 is Sunday) + AmEx payments moved from Feb 28
     "2026-03-02": [
@@ -1632,14 +1633,15 @@ SPECIAL_TRANSACTIONS = {
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
-    "2026-03-06": [{"type": "income", "amount": 81380, "desc": "Cert Sales CC Deposit ($81,380 - Expected Friday)"}],
+    "2026-03-09": [{"type": "income", "amount": 78000, "desc": "Cert Sales CC Deposit (Charged 3/2, Posts Monday)"}],
     "2026-03-16": [
         {"type": "comms_execs", "amount": -46000, "desc": "Comms & Execs"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
     ],
     "2026-03-17": [
         {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
-        {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
+        {"type": "amex", "amount": -83000, "desc": "AmEx Payment #1"},
+        {"type": "amex", "amount": -57000, "desc": "AmEx Payment #2"},
     ],
     # March end-of-month AmEx
     "2026-03-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
@@ -2355,7 +2357,7 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
             {"date": "2026-03-02", "desc": "AmEx Payment #2", "amount": 77073},
             {"date": "2026-03-02", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
             {"date": "2026-03-03", "desc": "Payroll Checks", "amount": 60000},
-            {"date": "2026-03-17", "desc": "AmEx + Payroll", "amount": 190000},
+            {"date": "2026-03-17", "desc": "AmEx ($83K+$57K) + Payroll", "amount": 200000},
             {"date": "2026-03-31", "desc": "AmEx Payment", "amount": 130000},
         ]
         upcoming = [p for p in payments if p["date"] >= today.isoformat()]
