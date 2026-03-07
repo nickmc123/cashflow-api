@@ -1645,7 +1645,7 @@ SPECIAL_TRANSACTIONS = {
         {"type": "amex", "amount": -28000, "desc": "AmEx JL Plat Corp (New Card)"},
     ],
     # March end-of-month AmEx
-    "2026-03-31": [{"type": "amex", "amount": -102000, "desc": "AmEx Payment (Reduced - $28K moved to JL Plat Corp)"}],
+    "2026-03-31": [{"type": "amex", "amount": -110000, "desc": "AmEx Payment"}],
     
     # April 2026
     "2026-04-01": [
@@ -2359,7 +2359,7 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
             {"date": "2026-03-02", "desc": "ADP Tax + 401K + Fees", "amount": 25430},
             {"date": "2026-03-03", "desc": "Payroll Checks", "amount": 60000},
             {"date": "2026-03-17", "desc": "AmEx ($83K+$57K+$28K JL) + Payroll", "amount": 228000},
-            {"date": "2026-03-31", "desc": "AmEx Payment (reduced)", "amount": 102000},
+            {"date": "2026-03-31", "desc": "AmEx Payment", "amount": 110000},
         ]
         upcoming = [p for p in payments if p["date"] >= today.isoformat()]
         if not upcoming:
