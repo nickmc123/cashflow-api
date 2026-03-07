@@ -1743,7 +1743,7 @@ def should_include_special_transaction(txn_type: str, amount: int, scheduled_dat
     
     # Check if confirmed in bank data
     try:
-        conn = get_db_connection()
+        conn = get_db()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         
         # Look for matching debit within 3 days of scheduled date
@@ -1767,7 +1767,7 @@ def should_include_special_transaction(txn_type: str, amount: int, scheduled_dat
             SELECT id FROM bank_transactions 
             WHERE date >= %s::date - interval '1 day'
             AND date <= %s::date + interval '3 days'
-            AND debit_amount >= %s AND debit_amount <= %s
+            AND debit >= %s AND debit <= %s
             AND UPPER(description) LIKE %s
             LIMIT 1
         """, (scheduled_date, scheduled_date, min_amount, max_amount, search_pattern))
@@ -2607,7 +2607,7 @@ async def api_dashboard(code: str = Query(...)):
     upcoming_payments.sort(key=lambda x: x["date"])
     
     # Recent transactions (last 10)
-    conn = get_db_connection()
+    conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT date, description, debit, credit, balance, category FROM bank_transactions ORDER BY date DESC, id DESC LIMIT 10")
     recent = []
@@ -2685,7 +2685,7 @@ async def api_transactions(
     """Get transactions with filtering."""
     verify_code(code)
     
-    conn = get_db_connection()
+    conn = get_db()
     cur = conn.cursor()
     
     where_clauses = []
