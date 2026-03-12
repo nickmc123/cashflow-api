@@ -1389,7 +1389,7 @@ def rebuild_forecast(starting_balance: float, days_ahead: int = 90):
     DAILY_CC = 15836      # CC processor deposits
     DAILY_EDEPOSIT = 14059  # E-deposits
     DAILY_WIRES = 1907    # Wire income
-    DAILY_OPS = -9044     # Daily operations (refund checks)
+    DAILY_OPS = -7000     # Daily operations (refund checks)
     
     # Net daily income on business days (excluding special transactions)
     DAILY_NET = DAILY_CC + DAILY_EDEPOSIT + DAILY_WIRES + DAILY_OPS  # ~$22,758
@@ -1712,7 +1712,7 @@ SPECIAL_TRANSACTIONS = {
 DAILY_AUTHNET = 15836  # CC processor deposits - weighted avg (80% last 2 weeks, 20% 90-day)
 DAILY_CHECK_DEPOSITS = 14059  # E-Deposits - weighted avg (50% last 2 weeks, 50% 60-day normalized)
 DAILY_WIRE = 1907  # ~$9.5K/week from CFI and FRE - weighted avg (50% last 2 weeks, 50% 60-day normalized)
-DAILY_OPS = 9044  # Daily ops - refund checks only (< $1,500, excludes 5-series payroll)
+DAILY_OPS = 7000  # Daily ops - refund checks only (< $1,500, excludes 5-series payroll)
 MONTHLY_RENT = 8500  # Approximate monthly rent
 MONTHLY_RECURRING = 5000  # Insurance, utilities, etc.
 
