@@ -1629,7 +1629,6 @@ SPECIAL_TRANSACTIONS = {
         {"type": "amex", "amount": -91245, "desc": "AmEx Payment #1"},
         {"type": "amex", "amount": -77073, "desc": "AmEx Payment #2"},
         {"type": "comms_execs", "amount": -51000, "desc": "Comms & Execs"},
-        {"type": "blue_shield", "amount": -15000, "desc": "Blue Shield"},
         {"type": "payroll_tax", "amount": -25430, "desc": "ADP Tax + 401K + Fees"},
     ],
     "2026-03-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
