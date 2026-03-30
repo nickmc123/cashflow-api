@@ -1649,12 +1649,11 @@ SPECIAL_TRANSACTIONS = {
     "2026-04-01": [
         {"type": "amex", "amount": -20000, "desc": "AmEx CCMC Plat"},
         {"type": "amex", "amount": -88000, "desc": "AmEx Corp"},
-        {"type": "income", "amount": 59000, "desc": "GEVC Payment"},
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
     ],
     "2026-04-02": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-04-03": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
-    "2026-04-06": [{"type": "income", "amount": 60000, "desc": "Cert Sales CC Deposit"}],
+    "2026-04-05": [{"type": "income", "amount": 60000, "desc": "GEVC / Cert Sales Payment"}],
     "2026-04-15": [
         {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
         {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
@@ -2783,3 +2782,4 @@ async def health():
 
 # Mount static files last
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
