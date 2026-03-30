@@ -1819,6 +1819,19 @@ Examples:
                     bodyHtml += `</div>`;
                 }
                 
+                // Net Change row — always shown (except today's starting balance card)
+                if (row.net !== undefined && proj.period === 'daily') {
+                    const netAmt = row.net;
+                    const netSign = netAmt >= 0 ? '+' : '-';
+                    const netColor = netAmt >= 0 ? 'credit' : 'special';
+                    bodyHtml += `<div class="proj-section" style="border-top: 1px solid rgba(255,255,255,0.15); margin-top: 6px; padding-top: 6px;">
+                        <div class="proj-section-row" style="font-weight: 600;">
+                            <span class="proj-section-label">📊 Net Change</span>
+                            <span class="proj-section-value ${netColor}">${netSign}${fmt(Math.abs(netAmt))}</span>
+                        </div>
+                    </div>`;
+                }
+                
                 // Balance range for weekly/monthly
                 if (row.range && proj.period !== 'daily') {
                     bodyHtml += `<div class="proj-range">
