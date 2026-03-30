@@ -1839,20 +1839,24 @@ def get_daily_detail(date: datetime, forecast: dict, pending_special: dict = Non
             if should_include_special_transaction(txn["type"], txn["amount"], date_str):
                 detail["special"].append(txn)
     
-    # Calculate net
-    detail["net"] = detail["credits"]["total"] - detail["debits"]["total"]
+    # Calculate net (includes special transactions)
+    special_total = sum(t["amount"] for t in detail["special"])
+    detail["net"] = detail["credits"]["total"] - detail["debits"]["total"] + special_total
     
     return detail
 
 def generate_daily_projection(days: int) -> dict:
-    """Generate daily projection using forecast balances from database.
+    """Generate daily projection where balance change always equals displayed transactions.
     
-    Uses smart matching to only show pending special transactions (those that
-    haven't cleared yet based on real bank transaction history).
+    Recomputes balance day-by-day from the same detail breakdown shown to the user,
+    so the net change line always reconciles with the ending balance.
     """
     forecast = get_forecast_from_db()
     start_date = now_pacific().replace(hour=0, minute=0, second=0, microsecond=0)
     today_str = start_date.strftime("%Y-%m-%d")
+    
+    # Get starting balance (today's actual balance)
+    balance = float(get_today_balance())
     
     # Pre-fetch pending special transactions (avoids repeated DB calls)
     pending_special = get_pending_special_transactions(days_lookback=15)
@@ -1865,23 +1869,15 @@ def generate_daily_projection(days: int) -> dict:
         date = start_date + timedelta(days=i)
         date_str = date.strftime("%Y-%m-%d")
         
-        # Use forecast balance directly (already includes special transactions)
-        if date_str in forecast:
-            balance = int(forecast[date_str]["balance"])
-            note = forecast[date_str].get("note", "")
-        else:
-            # If date not in forecast, estimate from last known date
-            sorted_dates = sorted([d for d in forecast.keys() if d <= date_str])
-            if sorted_dates:
-                last_date = sorted_dates[-1]
-                balance = int(forecast[last_date]["balance"])
-                note = ""
-            else:
-                balance = int(get_today_balance())
-                note = ""
-        
-        # Get detail breakdown for display purposes (uses pending_special)
+        # Get detail breakdown (same data shown to user)
         detail = get_daily_detail(date, forecast, pending_special)
+        
+        if i > 0:
+            # Advance balance by exactly what the detail shows
+            # detail["net"] already includes specials (credits - debits + specials)
+            balance += detail["net"]
+        
+        note = "Current balance" if i == 0 else get_note_for_date(date_str, balance, pending_special)
         
         if balance < low_bal:
             low_bal, low_date, low_note = balance, date.strftime("%Y-%m-%d"), note
@@ -1893,6 +1889,7 @@ def generate_daily_projection(days: int) -> dict:
             "iso_date": date.strftime("%Y-%m-%d"),
             "balance": balance,
             "note": note,
+            "net": detail["net"],
             "credits": detail["credits"],
             "debits": detail["debits"],
             "special": detail["special"]
@@ -2778,4 +2775,5 @@ async def health():
 
 # Mount static files last
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
