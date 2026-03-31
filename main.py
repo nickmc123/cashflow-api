@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # Access code
-ACCESS_CODE = "***REMOVED***"
+ACCESS_CODE = os.environ.get("ACCESS_CODE", "cflownk")
 
 # Webhook URL for triggering updates
 WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=***REMOVED***"
