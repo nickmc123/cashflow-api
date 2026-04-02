@@ -2782,10 +2782,42 @@ async def voice_query(request: Request, code: str = Query(...)):
         return {"spoken_response": "I didn't catch a question. Could you try again?", "data": None}
     
     q = question.lower()
+    words = set(q.replace('?', '').replace(',', '').replace('.', '').split())
+    
+    def has_word(*check_words):
+        """Check if any of the given words appear as whole words in the query."""
+        return bool(words & set(check_words))
+    
+    def has_phrase(*phrases):
+        """Check if any phrase appears as substring in query."""
+        return any(p in q for p in phrases)
     
     try:
+        # --- PROFIT (check before balance since "making" could overlap) ---
+        if has_word('profit', 'making', 'earning', 'revenue', 'income', 'margin'):
+            spoken = f"The 30-day average profit is about ${ROLLING_30_DAY['gross_profit']:,.0f}. Cash in is roughly ${ROLLING_30_DAY['cash_in']:,.0f} per month and cash out is about ${ROLLING_30_DAY['cash_out']:,.0f}."
+            return {
+                "spoken_response": spoken,
+                "data": ROLLING_30_DAY
+            }
+        
+        # --- LOW POINT (check before payments since "lowest" contains "owe") ---
+        if has_word('low', 'lowest', 'worst', 'tightest', 'minimum', 'dip', 'bottom'):
+            proj = generate_daily_projection(60)
+            weekday_rows = [r for r in proj["rows"] if datetime.strptime(r["iso_date"], "%Y-%m-%d").weekday() < 5]
+            low = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+            
+            if low:
+                spoken = f"The lowest point in the next 60 days is ${low['balance']:,.0f} on {low['date']}."
+                if low.get("note"):
+                    spoken += f" That's driven by {low['note']}."
+            else:
+                spoken = "I couldn't calculate the low point right now."
+            
+            return {"spoken_response": spoken, "data": low}
+        
         # --- BALANCE QUERIES ---
-        if any(w in q for w in ['balance', 'how much', 'bank', 'account', 'cash on hand']):
+        if has_word('balance', 'bank', 'account') or has_phrase('how much', 'cash on hand'):
             proj = generate_daily_projection(7)
             balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
             today = now_pacific().strftime("%B %d")
@@ -2803,7 +2835,7 @@ async def voice_query(request: Request, code: str = Query(...)):
             }
         
         # --- UPCOMING PAYMENTS ---
-        if any(w in q for w in ['payment', 'due', 'coming up', 'upcoming', 'owe', 'bills', 'payroll', 'amex']):
+        if has_word('payment', 'payments', 'due', 'upcoming', 'owe', 'bills', 'payroll', 'amex') or has_phrase('coming up'):
             today = now_pacific().strftime("%Y-%m-%d")
             from datetime import date as date_type
             today_date = date_type.today()
@@ -2848,7 +2880,7 @@ async def voice_query(request: Request, code: str = Query(...)):
             }
         
         # --- CASH FLOW STATUS / GENERAL ---
-        if any(w in q for w in ['status', 'health', 'cash flow', 'cashflow', 'how are we', 'how we doing', 'overview', 'summary']):
+        if has_word('status', 'health', 'healthy', 'overview', 'summary', 'cashflow') or has_phrase('cash flow', 'how are we', 'how we doing', 'how things look'):
             proj = generate_daily_projection(60)
             today = now_pacific().strftime("%Y-%m-%d")
             balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
@@ -2884,7 +2916,7 @@ async def voice_query(request: Request, code: str = Query(...)):
             }
         
         # --- PROJECTION QUERIES ---
-        if any(w in q for w in ['project', 'forecast', 'next week', 'next month', 'looking ahead', 'predict']):
+        if has_word('project', 'projection', 'forecast', 'predict', 'prediction') or has_phrase('next week', 'next month', 'looking ahead'):
             if 'week' in q:
                 proj = generate_weekly_projection(4)
                 period = "4 weeks"
@@ -2909,29 +2941,6 @@ async def voice_query(request: Request, code: str = Query(...)):
             return {
                 "spoken_response": spoken,
                 "data": {"period": period, "start": start_bal, "end": end_bal, "change": change}
-            }
-        
-        # --- LOW POINT ---
-        if any(w in q for w in ['low', 'worst', 'tightest', 'minimum', 'dip']):
-            proj = generate_daily_projection(60)
-            weekday_rows = [r for r in proj["rows"] if datetime.strptime(r["iso_date"], "%Y-%m-%d").weekday() < 5]
-            low = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
-            
-            if low:
-                spoken = f"The lowest point in the next 60 days is ${low['balance']:,.0f} on {low['date']}."
-                if low.get("note"):
-                    spoken += f" That's driven by {low['note']}."
-            else:
-                spoken = "I couldn't calculate the low point right now."
-            
-            return {"spoken_response": spoken, "data": low}
-        
-        # --- PROFIT ---
-        if any(w in q for w in ['profit', 'making', 'earning', 'revenue', 'income']):
-            spoken = f"The 30-day average profit is about ${ROLLING_30_DAY['gross_profit']:,.0f}. Cash in is roughly ${ROLLING_30_DAY['cash_in']:,.0f} per month and cash out is about ${ROLLING_30_DAY['cash_out']:,.0f}."
-            return {
-                "spoken_response": spoken,
-                "data": ROLLING_30_DAY
             }
         
         # --- FALLBACK: Quick snapshot ---
