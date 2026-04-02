@@ -2761,6 +2761,200 @@ async def api_payments(code: str = Query(...), days: int = Query(60, ge=1, le=18
         "period_days": days
     }
 
+
+# ==========================================
+# VOICE QUERY API (for Stewart/Beast integration)
+# ==========================================
+
+@app.post("/api/voice-query")
+async def voice_query(request: Request, code: str = Query(...)):
+    """Voice-optimized query endpoint for Stewart/Beast integration.
+    Accepts a natural language question and returns a concise spoken response.
+    
+    Request body: { "question": "What's my bank balance?" }
+    Response: { "spoken_response": "...", "data": {...} }
+    """
+    verify_code(code)
+    
+    body = await request.json()
+    question = body.get("question", "").strip()
+    if not question:
+        return {"spoken_response": "I didn't catch a question. Could you try again?", "data": None}
+    
+    q = question.lower()
+    
+    try:
+        # --- BALANCE QUERIES ---
+        if any(w in q for w in ['balance', 'how much', 'bank', 'account', 'cash on hand']):
+            proj = generate_daily_projection(7)
+            balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
+            today = now_pacific().strftime("%B %d")
+            
+            weekday_rows = [r for r in proj["rows"] if datetime.strptime(r["iso_date"], "%Y-%m-%d").weekday() < 5]
+            low = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+            
+            spoken = f"The current balance as of {today} is ${balance:,.0f}."
+            if low and low["balance"] < balance * 0.8:
+                spoken += f" Heads up, the balance is expected to dip to ${low['balance']:,.0f} on {low['date']} due to {low.get('note', 'scheduled payments')}."
+            
+            return {
+                "spoken_response": spoken,
+                "data": {"balance": balance, "as_of": now_pacific().strftime("%Y-%m-%d")}
+            }
+        
+        # --- UPCOMING PAYMENTS ---
+        if any(w in q for w in ['payment', 'due', 'coming up', 'upcoming', 'owe', 'bills', 'payroll', 'amex']):
+            today = now_pacific().strftime("%Y-%m-%d")
+            from datetime import date as date_type
+            today_date = date_type.today()
+            cutoff = (today_date + timedelta(days=30)).isoformat()
+            
+            payments = []
+            for date_str, txns in SPECIAL_TRANSACTIONS.items():
+                if date_str >= today and date_str <= cutoff:
+                    for txn in txns:
+                        if txn["amount"] < 0:
+                            payment_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                            days_until = (payment_date - today_date).days
+                            payments.append({
+                                "date": date_str,
+                                "desc": txn["desc"],
+                                "amount": abs(txn["amount"]),
+                                "days_until": days_until
+                            })
+            payments.sort(key=lambda x: x["date"])
+            
+            if not payments:
+                return {"spoken_response": "There are no major payments scheduled in the next 30 days.", "data": {"payments": []}}
+            
+            total = sum(p["amount"] for p in payments)
+            
+            spoken_parts = [f"There are {len(payments)} payments totaling ${total:,.0f} in the next 30 days."]
+            for p in payments[:4]:
+                if p["days_until"] == 0:
+                    when = "today"
+                elif p["days_until"] == 1:
+                    when = "tomorrow"
+                else:
+                    when = f"in {p['days_until']} days"
+                spoken_parts.append(f"{p['desc']}: ${p['amount']:,.0f}, {when}.")
+            
+            if len(payments) > 4:
+                spoken_parts.append(f"Plus {len(payments) - 4} more after that.")
+            
+            return {
+                "spoken_response": " ".join(spoken_parts),
+                "data": {"payments": payments, "total": total}
+            }
+        
+        # --- CASH FLOW STATUS / GENERAL ---
+        if any(w in q for w in ['status', 'health', 'cash flow', 'cashflow', 'how are we', 'how we doing', 'overview', 'summary']):
+            proj = generate_daily_projection(60)
+            today = now_pacific().strftime("%Y-%m-%d")
+            balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
+            
+            weekday_rows = [r for r in proj["rows"] if datetime.strptime(r["iso_date"], "%Y-%m-%d").weekday() < 5]
+            low = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+            high = max(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+            
+            low_bal = low["balance"] if low else balance
+            if low_bal > 100000:
+                status_word = "healthy"
+            elif low_bal > 50000:
+                status_word = "okay but worth watching"
+            else:
+                status_word = "tight"
+            
+            spoken = f"Cash flow is {status_word}. Current balance is ${balance:,.0f}."
+            if low:
+                spoken += f" The low point over the next 60 days is ${low['balance']:,.0f} on {low['date']}."
+            if high:
+                spoken += f" The high point is ${high['balance']:,.0f} on {high['date']}."
+            spoken += f" Monthly profit is running about ${ROLLING_30_DAY['gross_profit']:,.0f}."
+            
+            return {
+                "spoken_response": spoken,
+                "data": {
+                    "balance": balance,
+                    "status": status_word,
+                    "low_point": {"date": low["iso_date"], "balance": low["balance"]} if low else None,
+                    "high_point": {"date": high["iso_date"], "balance": high["balance"]} if high else None,
+                    "monthly_profit": ROLLING_30_DAY["gross_profit"]
+                }
+            }
+        
+        # --- PROJECTION QUERIES ---
+        if any(w in q for w in ['project', 'forecast', 'next week', 'next month', 'looking ahead', 'predict']):
+            if 'week' in q:
+                proj = generate_weekly_projection(4)
+                period = "4 weeks"
+            elif 'month' in q:
+                proj = generate_weekly_projection(12)
+                period = "3 months"
+            else:
+                proj = generate_daily_projection(30)
+                period = "30 days"
+            
+            rows = proj.get("rows", [])
+            if not rows:
+                return {"spoken_response": "I don't have projection data available right now.", "data": None}
+            
+            start_bal = rows[0]["balance"]
+            end_bal = rows[-1]["balance"]
+            change = end_bal - start_bal
+            direction = "up" if change > 0 else "down"
+            
+            spoken = f"Looking at the next {period}: starting at ${start_bal:,.0f}, ending around ${end_bal:,.0f}, that's {direction} ${abs(change):,.0f}."
+            
+            return {
+                "spoken_response": spoken,
+                "data": {"period": period, "start": start_bal, "end": end_bal, "change": change}
+            }
+        
+        # --- LOW POINT ---
+        if any(w in q for w in ['low', 'worst', 'tightest', 'minimum', 'dip']):
+            proj = generate_daily_projection(60)
+            weekday_rows = [r for r in proj["rows"] if datetime.strptime(r["iso_date"], "%Y-%m-%d").weekday() < 5]
+            low = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+            
+            if low:
+                spoken = f"The lowest point in the next 60 days is ${low['balance']:,.0f} on {low['date']}."
+                if low.get("note"):
+                    spoken += f" That's driven by {low['note']}."
+            else:
+                spoken = "I couldn't calculate the low point right now."
+            
+            return {"spoken_response": spoken, "data": low}
+        
+        # --- PROFIT ---
+        if any(w in q for w in ['profit', 'making', 'earning', 'revenue', 'income']):
+            spoken = f"The 30-day average profit is about ${ROLLING_30_DAY['gross_profit']:,.0f}. Cash in is roughly ${ROLLING_30_DAY['cash_in']:,.0f} per month and cash out is about ${ROLLING_30_DAY['cash_out']:,.0f}."
+            return {
+                "spoken_response": spoken,
+                "data": ROLLING_30_DAY
+            }
+        
+        # --- FALLBACK: Quick snapshot ---
+        proj = generate_daily_projection(30)
+        balance = proj["rows"][0]["balance"] if proj["rows"] else get_today_balance()
+        weekday_rows = [r for r in proj["rows"] if datetime.strptime(r["iso_date"], "%Y-%m-%d").weekday() < 5]
+        low = min(weekday_rows, key=lambda x: x["balance"]) if weekday_rows else None
+        
+        spoken = f"Here's a quick snapshot: balance is ${balance:,.0f}"
+        if low:
+            spoken += f", low point in the next 30 days is ${low['balance']:,.0f} on {low['date']}"
+        spoken += ". What specifically would you like to know about?"
+        
+        return {"spoken_response": spoken, "data": {"balance": balance}}
+    
+    except Exception as e:
+        print(f"Voice query error: {e}")
+        return {
+            "spoken_response": "I ran into an issue pulling cash flow data. Let me try again in a moment.",
+            "data": {"error": str(e)}
+        }
+
+
 # ==========================================
 # END STEWART DASHBOARD API
 # ==========================================
