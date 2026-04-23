@@ -1657,12 +1657,13 @@ SPECIAL_TRANSACTIONS = {
     ],
     "2026-04-16": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-04-17": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
-    "2026-04-30": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
     
     # May 2026
     "2026-05-01": [
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
-        {"type": "insurance", "amount": -15000, "desc": "Blue Shield"},
+        {"type": "amex", "amount": -6000, "desc": "AmEx CCMC Plat"},
+        {"type": "amex", "amount": -44000, "desc": "AmEx Corp"},
+        {"type": "income", "amount": 95000, "desc": "GEVC Revenue"},
     ],
     "2026-05-04": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
     "2026-05-05": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
