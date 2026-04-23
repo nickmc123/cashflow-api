@@ -1663,10 +1663,12 @@ SPECIAL_TRANSACTIONS = {
         {"type": "comms", "amount": -51000, "desc": "Comms & Execs (BOM)"},
         {"type": "amex", "amount": -6000, "desc": "AmEx CCMC Plat"},
         {"type": "amex", "amount": -44000, "desc": "AmEx Corp"},
-        {"type": "income", "amount": 95000, "desc": "GEVC Revenue"},
     ],
     "2026-05-04": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
-    "2026-05-05": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
+    "2026-05-05": [
+        {"type": "payroll", "amount": -60000, "desc": "Payroll Checks"},
+        {"type": "income", "amount": 95000, "desc": "GEVC Revenue"},
+    ],
     "2026-05-15": [
         {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
         {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
