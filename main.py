@@ -1826,7 +1826,10 @@ SPECIAL_TRANSACTIONS = {
         {"type": "comms", "amount": -46000, "desc": "Comms & Execs (Mid)"},
         {"type": "amex", "amount": -130000, "desc": "AmEx Payment"},
     ],
-    "2026-05-18": [{"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"}],
+    "2026-05-18": [
+        {"type": "payroll", "amount": -25430, "desc": "ADP Tax/401K/Fees"},
+        {"type": "amex", "amount": -51000, "desc": "AmEx Payment"},
+    ],
     "2026-05-19": [{"type": "payroll", "amount": -60000, "desc": "Payroll Checks"}],
     "2026-05-31": [{"type": "amex", "amount": -130000, "desc": "AmEx Payment"}],
     
@@ -2348,27 +2351,30 @@ async def get_low_point(code: str = Query(...)):
 async def get_balance(date: str, code: str = Query(...)):
     verify_code(code)
     
-    # For historical dates, return actual end-of-day balance from transactions
-    conn = get_db()
-    if conn:
-        try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT balance FROM bank_transactions 
-                WHERE date = %s 
-                ORDER BY id DESC 
-                LIMIT 1
-            """, (date,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row:
-                return {"date": date, "balance": float(row["balance"]), "note": "Actual end-of-day balance"}
-        except Exception:
-            if conn:
-                conn.close()
+    today_str = today_pacific().strftime("%Y-%m-%d")
     
-    # Fall back to forecast for future dates
+    # For historical dates (before today), return actual end-of-day balance from transactions
+    if date < today_str:
+        conn = get_db()
+        if conn:
+            try:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute("""
+                    SELECT balance FROM bank_transactions 
+                    WHERE date = %s 
+                    ORDER BY id DESC 
+                    LIMIT 1
+                """, (date,))
+                row = cur.fetchone()
+                cur.close()
+                conn.close()
+                if row:
+                    return {"date": date, "balance": float(row["balance"]), "note": "Actual end-of-day balance"}
+            except Exception:
+                if conn:
+                    conn.close()
+    
+    # For today and future dates, use forecast (includes projected special transactions)
     forecast = get_forecast_from_db()
     if date in forecast:
         return {"date": date, "balance": forecast[date]["balance"], "note": forecast[date].get("note", "")}
