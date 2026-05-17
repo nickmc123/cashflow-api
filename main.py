@@ -641,10 +641,25 @@ def get_existing_transactions(conn, date: datetime.date) -> set:
     existing = set()
     for row in cur.fetchall():
         # Create signature from date + description + amounts
-        sig = f"{row[0]}|{row[1][:30] if row[1] else ''}|{row[2]}|{row[3]}|{row[4]}"
+        sig = f"{row[0]}|{normalize_description(row[1])[:50] if row[1] else ''}|{row[2]}|{row[3]}|{row[4]}"
         existing.add(sig)
     cur.close()
     return existing
+
+
+def normalize_description(desc: str) -> str:
+    """Normalize transaction description for dedup comparison.
+    Collapses multiple spaces, strips trailing ACH codes (CCD/, PPD/, CTX/, etc),
+    and normalizes case to prevent format-change duplicates from CNB."""
+    if not desc:
+        return ""
+    # Strip trailing ACH format codes
+    d = re.sub(r'\s+(CCD|PPD|CTX|WEB|TEL)/\s*$', '', desc)
+    # Collapse multiple spaces to single
+    d = re.sub(r'\s+', ' ', d)
+    # Strip trailing whitespace
+    d = d.strip()
+    return d
 
 def get_custom_category_rules():
     """Get custom category rules from database"""
@@ -780,7 +795,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     existing = set()
     for row in cur.fetchall():
         # Signature without balance - just date + description + amounts
-        sig = f"{row[0]}|{row[1][:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
+        sig = f"{row[0]}|{normalize_description(row[1])[:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
         existing.add(sig)
     
     # Sort transactions by date (oldest first)
@@ -795,7 +810,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         tx_date = tx['date'].date() if hasattr(tx['date'], 'date') else tx['date']
         
         # Check for duplicate (without balance in signature)
-        sig = f"{tx_date}|{tx['description'][:50] if tx['description'] else ''}|{float(tx['debit']):.2f}|{float(tx['credit']):.2f}"
+        sig = f"{tx_date}|{normalize_description(tx['description'])[:50] if tx['description'] else ''}|{float(tx['debit']):.2f}|{float(tx['credit']):.2f}"
         if sig in existing:
             skipped_count += 1
             continue
@@ -815,10 +830,12 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
                 tx_check_num = check_match.group(1)
         
         # Insert transaction with bank's balance (or 0 if not available)
+        # Normalize description before insert to prevent future format-change dupes
+        clean_desc = normalize_description(tx['description']) if tx['description'] else tx['description']
         cur.execute("""
             INSERT INTO bank_transactions (date, description, debit, credit, balance, category, check_number)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx_balance, tx_category, tx_check_num))
+        """, (tx_date, clean_desc, tx['debit'], tx['credit'], tx_balance, tx_category, tx_check_num))
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
@@ -1298,6 +1315,44 @@ async def delete_transactions(date_from: str = None, date_to: str = None, code: 
 
 class DeleteByIdsRequest(BaseModel):
     ids: list[int]
+
+
+
+@app.post("/normalize-descriptions")
+async def normalize_existing_descriptions(code: str = Query(...)):
+    """One-time cleanup: normalize all existing transaction descriptions in the DB."""
+    if code != ACCESS_CODE:
+        raise HTTPException(status_code=403, detail="Invalid access code")
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Get all transactions with descriptions
+        cur.execute("SELECT id, description FROM bank_transactions WHERE description IS NOT NULL AND description != ''")
+        rows = cur.fetchall()
+        
+        updated = 0
+        for row in rows:
+            original = row[1]
+            normalized = normalize_description(original)
+            if normalized != original:
+                cur.execute("UPDATE bank_transactions SET description = %s WHERE id = %s", (normalized, row[0]))
+                updated += 1
+        
+        conn.commit()
+        return {
+            "status": "success",
+            "total_checked": len(rows),
+            "updated": updated,
+            "message": f"Normalized {updated} transaction descriptions"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 @app.post("/delete-transactions-by-ids")
 async def delete_transactions_by_ids(request: DeleteByIdsRequest, code: str = None):
