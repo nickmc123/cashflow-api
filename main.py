@@ -2347,11 +2347,32 @@ async def get_low_point(code: str = Query(...)):
 @app.get("/balance/{date}")
 async def get_balance(date: str, code: str = Query(...)):
     verify_code(code)
-    forecast = get_forecast_from_db()
     
+    # For historical dates, return actual end-of-day balance from transactions
+    conn = get_db()
+    if conn:
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("""
+                SELECT balance FROM bank_transactions 
+                WHERE date = %s 
+                ORDER BY id DESC 
+                LIMIT 1
+            """, (date,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row:
+                return {"date": date, "balance": float(row["balance"]), "note": "Actual end-of-day balance"}
+        except Exception:
+            if conn:
+                conn.close()
+    
+    # Fall back to forecast for future dates
+    forecast = get_forecast_from_db()
     if date in forecast:
         return {"date": date, "balance": forecast[date]["balance"], "note": forecast[date].get("note", "")}
-    raise HTTPException(status_code=404, detail=f"No forecast for {date}")
+    raise HTTPException(status_code=404, detail=f"No data for {date}")
 
 @app.get("/payments")
 async def get_payments(code: str = Query(...)):
@@ -2364,7 +2385,7 @@ async def get_payments(code: str = Query(...)):
     payments = []
     for date_str, txns in SPECIAL_TRANSACTIONS.items():
         for txn in txns:
-            if txn["type"] in ["amex", "payroll", "payroll_tax"]:
+            if txn["type"] in ["amex", "payroll", "payroll_tax", "comms", "comms_execs", "blue_shield"]:
                 payments.append({
                     "date": date_str,
                     "type": txn["type"],
