@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import httpx
 import os
 import re
@@ -371,6 +371,17 @@ def get_today_balance():
 class DataSubmission(BaseModel):
     data: str
 
+
+class DailyBalanceAnchor(BaseModel):
+    date: str
+    closing_balance: float
+
+
+class DailyBalancesRequest(BaseModel):
+    anchors: List[DailyBalanceAnchor]
+    current_balance: float
+
+
 def parse_bank_data(raw_data: str) -> list:
     """Parse bank transaction data from various formats including messy web-copied data.
     
@@ -641,10 +652,25 @@ def get_existing_transactions(conn, date: datetime.date) -> set:
     existing = set()
     for row in cur.fetchall():
         # Create signature from date + description + amounts
-        sig = f"{row[0]}|{row[1][:30] if row[1] else ''}|{row[2]}|{row[3]}|{row[4]}"
+        sig = f"{row[0]}|{normalize_description(row[1])[:50] if row[1] else ''}|{row[2]}|{row[3]}|{row[4]}"
         existing.add(sig)
     cur.close()
     return existing
+
+
+def normalize_description(desc: str) -> str:
+    """Normalize transaction description for dedup comparison.
+    Collapses multiple spaces, strips trailing ACH codes (CCD/, PPD/, CTX/, etc),
+    and normalizes case to prevent format-change duplicates from CNB."""
+    if not desc:
+        return ""
+    # Strip trailing ACH format codes
+    d = re.sub(r'\s+(CCD|PPD|CTX|WEB|TEL)/\s*$', '', desc)
+    # Collapse multiple spaces to single
+    d = re.sub(r'\s+', ' ', d)
+    # Strip trailing whitespace
+    d = d.strip()
+    return d
 
 def get_custom_category_rules():
     """Get custom category rules from database"""
@@ -780,7 +806,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     existing = set()
     for row in cur.fetchall():
         # Signature without balance - just date + description + amounts
-        sig = f"{row[0]}|{row[1][:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
+        sig = f"{row[0]}|{normalize_description(row[1])[:50] if row[1] else ''}|{float(row[2]):.2f}|{float(row[3]):.2f}"
         existing.add(sig)
     
     # Sort transactions by date (oldest first)
@@ -795,7 +821,7 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
         tx_date = tx['date'].date() if hasattr(tx['date'], 'date') else tx['date']
         
         # Check for duplicate (without balance in signature)
-        sig = f"{tx_date}|{tx['description'][:50] if tx['description'] else ''}|{float(tx['debit']):.2f}|{float(tx['credit']):.2f}"
+        sig = f"{tx_date}|{normalize_description(tx['description'])[:50] if tx['description'] else ''}|{float(tx['debit']):.2f}|{float(tx['credit']):.2f}"
         if sig in existing:
             skipped_count += 1
             continue
@@ -815,10 +841,12 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
                 tx_check_num = check_match.group(1)
         
         # Insert transaction with bank's balance (or 0 if not available)
+        # Normalize description before insert to prevent future format-change dupes
+        clean_desc = normalize_description(tx['description']) if tx['description'] else tx['description']
         cur.execute("""
             INSERT INTO bank_transactions (date, description, debit, credit, balance, category, check_number)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (tx_date, tx['description'], tx['debit'], tx['credit'], tx_balance, tx_category, tx_check_num))
+        """, (tx_date, clean_desc, tx['debit'], tx['credit'], tx_balance, tx_category, tx_check_num))
         
         existing.add(sig)  # Prevent duplicates within same submission
         added_count += 1
@@ -1298,6 +1326,131 @@ async def delete_transactions(date_from: str = None, date_to: str = None, code: 
 
 class DeleteByIdsRequest(BaseModel):
     ids: list[int]
+
+
+
+@app.post("/set-daily-balances")
+async def set_daily_balances(request: DailyBalancesRequest, code: str = Query(...)):
+    """Set balances using multiple daily anchor points in a single pass.
+    
+    Accepts a list of {date, closing_balance} pairs. Each anchor sets the 
+    end-of-day balance for that date. Intra-day balances are calculated 
+    backward from each anchor. Much more efficient than calling set-balance 
+    multiple times.
+    """
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Build anchor lookup: date -> closing_balance
+    anchors = {}
+    for a in request.anchors:
+        anchor_date = datetime.strptime(a.date, "%Y-%m-%d").date()
+        anchors[anchor_date] = a.closing_balance
+    
+    if not anchors:
+        cur.close()
+        conn.close()
+        return {"status": "error", "message": "No anchors provided"}
+    
+    # Get all transactions ordered by date DESC, id DESC (newest first)
+    cur.execute("""
+        SELECT id, date, debit, credit, balance 
+        FROM bank_transactions 
+        ORDER BY date DESC, id DESC
+    """)
+    rows = cur.fetchall()
+    
+    if not rows:
+        cur.close()
+        conn.close()
+        return {"status": "error", "message": "No transactions found"}
+    
+    # Walk through transactions newest-first
+    # When we hit a new date that has an anchor, reset running_balance
+    running_balance = request.current_balance or (anchors[max(anchors)] if anchors else 0)
+    current_date = None
+    updated_count = 0
+    anchors_applied = 0
+    
+    for row in rows:
+        txn_date = row['date']
+        
+        # When date changes and we have an anchor for this new date, apply it
+        if txn_date != current_date:
+            current_date = txn_date
+            if txn_date in anchors:
+                running_balance = anchors[txn_date]
+                anchors_applied += 1
+        
+        # Update balance
+        cur.execute("""
+            UPDATE bank_transactions SET balance = %s WHERE id = %s
+        """, (running_balance, row['id']))
+        updated_count += 1
+        
+        # Work backwards
+        running_balance = running_balance + float(row['debit']) - float(row['credit'])
+    
+    conn.commit()
+    
+    # Update forecast balance if current_balance provided
+    if request.current_balance:
+        update_forecast_balance(request.current_balance)
+    
+    cur.close()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "updated": updated_count,
+        "anchors_applied": anchors_applied,
+        "total_anchors": len(anchors),
+        "earliest_balance": running_balance,
+        "message": f"Applied {anchors_applied} daily anchors across {updated_count} transactions"
+    }
+
+
+
+@app.post("/normalize-descriptions")
+async def normalize_existing_descriptions(code: str = Query(...)):
+    """One-time cleanup: normalize all existing transaction descriptions in the DB."""
+    if code != ACCESS_CODE:
+        raise HTTPException(status_code=403, detail="Invalid access code")
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Get all transactions with descriptions
+        cur.execute("SELECT id, description FROM bank_transactions WHERE description IS NOT NULL AND description != ''")
+        rows = cur.fetchall()
+        
+        updated = 0
+        for row in rows:
+            original = row[1]
+            normalized = normalize_description(original)
+            if normalized != original:
+                cur.execute("UPDATE bank_transactions SET description = %s WHERE id = %s", (normalized, row[0]))
+                updated += 1
+        
+        conn.commit()
+        return {
+            "status": "success",
+            "total_checked": len(rows),
+            "updated": updated,
+            "message": f"Normalized {updated} transaction descriptions"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 @app.post("/delete-transactions-by-ids")
 async def delete_transactions_by_ids(request: DeleteByIdsRequest, code: str = None):
@@ -2220,10 +2373,15 @@ async def get_payments(code: str = Query(...)):
                 })
     
     # Add Comms & Execs for upcoming months
-    for month in range(1, 4):  # Jan, Feb, Mar
-        year = 2026
-        first_str = f"{year}-{month:02d}-01"
-        fifteenth_str = f"{year}-{month:02d}-15"
+    # Generate comms for next 3 months dynamically
+    for i in range(3):
+        target_month = today.month + i
+        year = today.year
+        if target_month > 12:
+            target_month -= 12
+            year += 1
+        first_str = f"{year}-{target_month:02d}-01"
+        fifteenth_str = f"{year}-{target_month:02d}-15"
         
         if first_str >= today.isoformat() and first_str not in [p["date"] for p in payments]:
             payments.append({"date": first_str, "type": "comms_execs", "desc": "Comms & Execs", "amount": BOM_CHECKS})
