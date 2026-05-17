@@ -2211,7 +2211,7 @@ async def get_payments(code: str = Query(...)):
     payments = []
     for date_str, txns in SPECIAL_TRANSACTIONS.items():
         for txn in txns:
-            if txn["type"] in ["amex", "payroll", "payroll_tax"]:
+            if txn["type"] in ["amex", "payroll", "payroll_tax", "comms", "comms_execs", "blue_shield"]:
                 payments.append({
                     "date": date_str,
                     "type": txn["type"],
@@ -2220,10 +2220,15 @@ async def get_payments(code: str = Query(...)):
                 })
     
     # Add Comms & Execs for upcoming months
-    for month in range(1, 4):  # Jan, Feb, Mar
-        year = 2026
-        first_str = f"{year}-{month:02d}-01"
-        fifteenth_str = f"{year}-{month:02d}-15"
+    # Generate comms for next 3 months dynamically
+    for i in range(3):
+        target_month = today.month + i
+        year = today.year
+        if target_month > 12:
+            target_month -= 12
+            year += 1
+        first_str = f"{year}-{target_month:02d}-01"
+        fifteenth_str = f"{year}-{target_month:02d}-15"
         
         if first_str >= today.isoformat() and first_str not in [p["date"] for p in payments]:
             payments.append({"date": first_str, "type": "comms_execs", "desc": "Comms & Execs", "amount": BOM_CHECKS})
