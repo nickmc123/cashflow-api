@@ -159,6 +159,117 @@ def check_transaction_cleared(scheduled_txn: dict, real_transactions: list, sche
     return False
 
 
+def _clamp_day_of_month(year: int, month: int, day: int) -> DateType:
+    """Build a date, clamping the day to the last valid day of the month.
+
+    e.g. requesting day 31 for February returns Feb 28 (or 29 in a leap year).
+    """
+    # Find last day of month by stepping to the first of the next month minus one day
+    if month == 12:
+        first_next = DateType(year + 1, 1, 1)
+    else:
+        first_next = DateType(year, month + 1, 1)
+    last_day = (first_next - timedelta(days=1)).day
+    return DateType(year, month, min(day, last_day))
+
+
+def get_upcoming_bills_raw() -> list:
+    """Fetch user-entered upcoming bills from the database.
+
+    Returns a list of dicts (or empty list if no DB / no rows). Degrades
+    gracefully so the rest of the forecast works even if the table is missing.
+    """
+    conn = get_db()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, name, amount, due_date, recurring_monthly, notes, created_at
+            FROM upcoming_bills
+            ORDER BY due_date
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"Error loading upcoming bills: {e}")
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return []
+
+
+def get_bills_special_transactions(horizon_days: int = 400) -> dict:
+    """Expand user-entered upcoming bills into a date-keyed special-transaction dict.
+
+    Mirrors the shape of SPECIAL_TRANSACTIONS so bills flow through the same
+    forecast engine (get_daily_detail -> projections -> summary/payments).
+
+    - One-time bills land on their due_date.
+    - Monthly-recurring bills repeat each month from the due_date forward,
+      clamping the day-of-month (e.g. Jan 31 -> Feb 28).
+    All bill amounts are stored as positive but emitted as negative (debits).
+    """
+    bills = get_upcoming_bills_raw()
+    today = today_pacific()
+    horizon = today + timedelta(days=horizon_days)
+    result: dict = {}
+
+    for b in bills:
+        try:
+            amount = abs(float(b["amount"]))
+            due = b["due_date"]
+            if isinstance(due, str):
+                due = datetime.strptime(due, "%Y-%m-%d").date()
+            name = b.get("name") or "Upcoming Bill"
+            recurring = bool(b.get("recurring_monthly"))
+        except Exception:
+            continue
+
+        def _emit(d: DateType, label: str):
+            ds = d.strftime("%Y-%m-%d")
+            result.setdefault(ds, []).append({
+                "type": "bill",
+                "amount": -amount,
+                "desc": label,
+                "bill_id": b.get("id"),
+            })
+
+        if not recurring:
+            # Only emit if it is today or in the future (past bills already cleared/irrelevant)
+            if due >= today:
+                _emit(due, name)
+            continue
+
+        # Recurring monthly: emit from the first occurrence on/after today up to horizon
+        anchor_day = due.day
+        year, month = due.year, due.month
+        # Fast-forward the starting month to no earlier than this month
+        while DateType(year, month, 1) < DateType(today.year, today.month, 1):
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+        # Walk forward month by month
+        guard = 0
+        while guard < 600:
+            guard += 1
+            occ = _clamp_day_of_month(year, month, anchor_day)
+            if occ > horizon:
+                break
+            if occ >= today and occ >= due:
+                _emit(occ, f"{name} (monthly)")
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+    return result
+
+
 def get_pending_special_transactions(days_lookback: int = 15) -> dict:
     """
     Get special transactions that haven't cleared yet.
@@ -189,7 +300,18 @@ def get_pending_special_transactions(days_lookback: int = 15) -> dict:
         
         if pending_txns:
             pending[date_str] = pending_txns
-    
+
+    # Merge in user-entered upcoming bills so they flow through the same
+    # forecast engine as the built-in scheduled payments.
+    try:
+        for date_str, bill_txns in get_bills_special_transactions().items():
+            scheduled_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if scheduled_date < today - timedelta(days=days_lookback):
+                continue
+            pending.setdefault(date_str, []).extend(bill_txns)
+    except Exception as e:
+        print(f"Error merging upcoming bills into projection: {e}")
+
     return pending
 
 def init_db():
@@ -235,6 +357,27 @@ def init_db():
             category TEXT NOT NULL,
             match_type TEXT DEFAULT 'contains',
             priority INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # User-entered upcoming bills that feed the cash-flow forecast
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS upcoming_bills (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            amount DECIMAL(12,2) NOT NULL,
+            due_date DATE NOT NULL,
+            recurring_monthly BOOLEAN DEFAULT FALSE,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Positive Pay inquiries / instructions captured from users
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS positive_pay_inquiries (
+            id SERIAL PRIMARY KEY,
+            message TEXT NOT NULL,
+            status TEXT DEFAULT 'open',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -380,6 +523,18 @@ class DailyBalanceAnchor(BaseModel):
 class DailyBalancesRequest(BaseModel):
     anchors: List[DailyBalanceAnchor]
     current_balance: float
+
+
+class UpcomingBill(BaseModel):
+    name: str
+    amount: float
+    due_date: str  # YYYY-MM-DD
+    recurring_monthly: bool = False
+    notes: Optional[str] = None
+
+
+class PositivePayInquiry(BaseModel):
+    message: str
 
 
 def parse_bank_data(raw_data: str) -> list:
@@ -2327,17 +2482,45 @@ async def get_summary(code: str = Query(...)):
         "profit_30day": gross_profit
     }
 
+def apply_bills_to_forecast(forecast: dict) -> dict:
+    """Return a copy of the stored forecast with upcoming bills applied.
+
+    Each bill reduces the projected balance on its due date and every later
+    date (cumulative), so the static forecast table read by /forecast,
+    /low-point and /balance reflects user-entered bills. Degrades to the
+    unmodified forecast if no bills / no DB.
+    """
+    try:
+        bills_by_date = get_bills_special_transactions()
+    except Exception as e:
+        print(f"Error applying bills to forecast: {e}")
+        return forecast
+    if not bills_by_date:
+        return forecast
+
+    adjusted = {d: dict(v) for d, v in forecast.items()}
+    sorted_dates = sorted(adjusted.keys())
+    cumulative = 0.0
+    for d in sorted_dates:
+        # Bills due on this date reduce this and all subsequent balances
+        for txn in bills_by_date.get(d, []):
+            cumulative += txn["amount"]  # amount is negative
+        if cumulative:
+            adjusted[d]["balance"] = adjusted[d]["balance"] + cumulative
+    return adjusted
+
+
 @app.get("/forecast")
 async def get_forecast(code: str = Query(...)):
     verify_code(code)
-    forecast = get_forecast_from_db()
+    forecast = apply_bills_to_forecast(get_forecast_from_db())
     return forecast
 
 @app.get("/low-point")
 async def get_low_point(code: str = Query(...)):
     verify_code(code)
-    forecast = get_forecast_from_db()
-    
+    forecast = apply_bills_to_forecast(get_forecast_from_db())
+
     low_point = min(forecast.values(), key=lambda x: x["balance"])
     low_date = [k for k, v in forecast.items() if v["balance"] == low_point["balance"]][0]
     
@@ -2374,8 +2557,9 @@ async def get_balance(date: str, code: str = Query(...)):
                 if conn:
                     conn.close()
     
-    # For today and future dates, use forecast (includes projected special transactions)
-    forecast = get_forecast_from_db()
+    # For today and future dates, use forecast (includes projected special
+    # transactions and user-entered upcoming bills)
+    forecast = apply_bills_to_forecast(get_forecast_from_db())
     if date in forecast:
         return {"date": date, "balance": forecast[date]["balance"], "note": forecast[date].get("note", "")}
     raise HTTPException(status_code=404, detail=f"No data for {date}")
@@ -2399,6 +2583,19 @@ async def get_payments(code: str = Query(...)):
                     "amount": abs(txn["amount"])
                 })
     
+    # Add user-entered upcoming bills
+    try:
+        for date_str, bill_txns in get_bills_special_transactions().items():
+            for txn in bill_txns:
+                payments.append({
+                    "date": date_str,
+                    "type": "bill",
+                    "desc": txn["desc"],
+                    "amount": abs(txn["amount"])
+                })
+    except Exception as e:
+        print(f"Error adding bills to payments: {e}")
+
     # Add Comms & Execs for upcoming months
     # Generate comms for next 3 months dynamically
     for i in range(3):
@@ -2451,6 +2648,177 @@ async def get_payments(code: str = Query(...)):
         })
     
     return {"payments": result}
+
+# ==========================================
+# UPCOMING BILLS (user-entered forecast inputs)
+# ==========================================
+
+@app.get("/bills")
+async def list_bills(code: str = Query(...)):
+    """List user-entered upcoming bills."""
+    verify_code(code)
+    bills = get_upcoming_bills_raw()
+    result = []
+    for b in bills:
+        due = b["due_date"]
+        due_str = due.strftime("%Y-%m-%d") if hasattr(due, "strftime") else str(due)
+        result.append({
+            "id": b["id"],
+            "name": b["name"],
+            "amount": float(b["amount"]),
+            "due_date": due_str,
+            "recurring_monthly": bool(b["recurring_monthly"]),
+            "notes": b.get("notes") or "",
+        })
+    return {"bills": result}
+
+@app.post("/bills")
+async def create_bill(bill: UpcomingBill, code: str = Query(...)):
+    """Add a user-entered upcoming bill that feeds the cash-flow forecast."""
+    verify_code(code)
+    # Validate date
+    try:
+        datetime.strptime(bill.due_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="due_date must be YYYY-MM-DD")
+    if not bill.name or not bill.name.strip():
+        raise HTTPException(status_code=400, detail="name is required")
+    if bill.amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be greater than 0")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            INSERT INTO upcoming_bills (name, amount, due_date, recurring_monthly, notes)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (bill.name.strip(), abs(bill.amount), bill.due_date,
+              bill.recurring_monthly, (bill.notes or "").strip() or None))
+        new_id = cur.fetchone()["id"]
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to save bill: {e}")
+    return {"status": "ok", "id": new_id}
+
+@app.delete("/bills/{bill_id}")
+async def delete_bill(bill_id: int, code: str = Query(...)):
+    """Delete a user-entered upcoming bill."""
+    verify_code(code)
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM upcoming_bills WHERE id = %s", (bill_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to delete bill: {e}")
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No bill with id {bill_id}")
+    return {"status": "ok", "deleted": bill_id}
+
+# ==========================================
+# POSITIVE PAY (inquiry / visibility)
+# ==========================================
+# NOTE: No concrete positive-pay data source or endpoint exists in this app
+# yet (verified by repo-wide grep). This captures the user's positive-pay
+# question/instruction so it is recorded and surfaced; it must be wired to the
+# real positive-pay upload source (e.g. bank file / status feed) once known.
+
+@app.get("/positive-pay-status")
+async def positive_pay_status(code: str = Query(...)):
+    """Return positive-pay visibility data plus any captured inquiries.
+
+    Currently there is no live positive-pay upload feed wired in, so
+    `source_connected` is False and the UI should show an inquiry prompt.
+    """
+    verify_code(code)
+    inquiries = []
+    conn = get_db()
+    if conn:
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("""
+                SELECT id, message, status, created_at
+                FROM positive_pay_inquiries
+                ORDER BY created_at DESC
+                LIMIT 50
+            """)
+            for r in cur.fetchall():
+                created = r["created_at"]
+                inquiries.append({
+                    "id": r["id"],
+                    "message": r["message"],
+                    "status": r["status"],
+                    "created_at": created.isoformat() if hasattr(created, "isoformat") else str(created),
+                })
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"Error loading positive-pay inquiries: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return {
+        "source_connected": False,
+        "last_upload": None,
+        "message": "No live positive-pay upload feed is connected yet. Submit a question or instruction below and it will be recorded.",
+        "inquiries": inquiries,
+    }
+
+@app.post("/positive-pay-inquiry")
+async def create_positive_pay_inquiry(inquiry: PositivePayInquiry, code: str = Query(...)):
+    """Record a user's positive-pay question/instruction."""
+    verify_code(code)
+    if not inquiry.message or not inquiry.message.strip():
+        raise HTTPException(status_code=400, detail="message is required")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            INSERT INTO positive_pay_inquiries (message)
+            VALUES (%s) RETURNING id
+        """, (inquiry.message.strip(),))
+        new_id = cur.fetchone()["id"]
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to record inquiry: {e}")
+    # Notify via the existing webhook so the operator sees it
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(WEBHOOK_URL, json={
+                "type": "positive_pay_inquiry",
+                "message": inquiry.message.strip(),
+                "timestamp": now_pacific().isoformat()
+            })
+    except Exception:
+        pass
+    return {"status": "ok", "id": new_id}
 
 @app.get("/ask")
 async def ask_question(code: str = Query(...), question: str = Query(...)):
