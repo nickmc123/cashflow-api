@@ -1295,6 +1295,100 @@ async def set_balance(
     }
 
 
+class DailyBalanceAnchor(BaseModel):
+    date: str
+    closing_balance: float
+
+class DailyBalancesRequest(BaseModel):
+    anchors: List[DailyBalanceAnchor]
+    current_balance: Optional[float] = None
+
+@app.post("/set-daily-balances")
+async def set_daily_balances(request: DailyBalancesRequest, code: str = Query(...)):
+    """Set balances using multiple daily anchor points in a single pass.
+    
+    Accepts a list of {date, closing_balance} pairs. Each anchor sets the 
+    end-of-day balance for that date. Intra-day balances are calculated 
+    backward from each anchor. Much more efficient than calling set-balance 
+    multiple times.
+    """
+    verify_code(code)
+    
+    conn = get_db()
+    if not conn:
+        return {"status": "error", "message": "Database not available"}
+    
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Build anchor lookup: date -> closing_balance
+    anchors = {}
+    for a in request.anchors:
+        anchor_date = datetime.strptime(a.date, "%Y-%m-%d").date()
+        anchors[anchor_date] = a.closing_balance
+    
+    if not anchors:
+        cur.close()
+        conn.close()
+        return {"status": "error", "message": "No anchors provided"}
+    
+    # Get all transactions ordered by date DESC, id DESC (newest first)
+    cur.execute("""
+        SELECT id, date, debit, credit, balance 
+        FROM bank_transactions 
+        ORDER BY date DESC, id DESC
+    """)
+    rows = cur.fetchall()
+    
+    if not rows:
+        cur.close()
+        conn.close()
+        return {"status": "error", "message": "No transactions found"}
+    
+    # Walk through transactions newest-first
+    # When we hit a new date that has an anchor, reset running_balance
+    running_balance = request.current_balance or (anchors[max(anchors)] if anchors else 0)
+    current_date = None
+    updated_count = 0
+    anchors_applied = 0
+    
+    for row in rows:
+        txn_date = row['date']
+        
+        # When date changes and we have an anchor for this new date, apply it
+        if txn_date != current_date:
+            current_date = txn_date
+            if txn_date in anchors:
+                running_balance = anchors[txn_date]
+                anchors_applied += 1
+        
+        # Update balance
+        cur.execute("""
+            UPDATE bank_transactions SET balance = %s WHERE id = %s
+        """, (running_balance, row['id']))
+        updated_count += 1
+        
+        # Work backwards
+        running_balance = running_balance + float(row['debit']) - float(row['credit'])
+    
+    conn.commit()
+    
+    # Update forecast balance if current_balance provided
+    if request.current_balance:
+        update_forecast_balance(request.current_balance)
+    
+    cur.close()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "updated": updated_count,
+        "anchors_applied": anchors_applied,
+        "total_anchors": len(anchors),
+        "earliest_balance": running_balance,
+        "message": f"Applied {anchors_applied} daily anchors across {updated_count} transactions"
+    }
+
+
 @app.post("/delete-transactions")
 async def delete_transactions(date_from: str = None, date_to: str = None, code: str = None):
     """Delete transactions in a date range"""
