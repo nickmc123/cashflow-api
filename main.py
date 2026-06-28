@@ -185,7 +185,8 @@ def get_upcoming_bills_raw() -> list:
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            SELECT id, name, amount, due_date, recurring_monthly, notes, created_at
+            SELECT id, name, amount, due_date, recurring_monthly, notes, created_at,
+                   COALESCE(is_income, FALSE) AS is_income
             FROM upcoming_bills
             ORDER BY due_date
         """)
@@ -226,14 +227,19 @@ def get_bills_special_transactions(horizon_days: int = 400) -> dict:
                 due = datetime.strptime(due, "%Y-%m-%d").date()
             name = b.get("name") or "Upcoming Bill"
             recurring = bool(b.get("recurring_monthly"))
+            is_income = bool(b.get("is_income"))
         except Exception:
             continue
+
+        # Income adds to balance (positive credit); bills subtract (negative debit).
+        signed_amount = amount if is_income else -amount
+        entry_type = "income" if is_income else "bill"
 
         def _emit(d: DateType, label: str):
             ds = d.strftime("%Y-%m-%d")
             result.setdefault(ds, []).append({
-                "type": "bill",
-                "amount": -amount,
+                "type": entry_type,
+                "amount": signed_amount,
                 "desc": label,
                 "bill_id": b.get("id"),
             })
@@ -387,6 +393,13 @@ def init_db():
             cur.execute(f"ALTER TABLE bank_transactions ADD COLUMN {col} {col_type}")
         except:
             conn.rollback()
+    # Migration: upcoming_bills.is_income lets a row represent scheduled income
+    # (a credit that ADDS to the projected balance) instead of a bill/debit.
+    # Idempotent: safe to run on every startup.
+    try:
+        cur.execute("ALTER TABLE upcoming_bills ADD COLUMN IF NOT EXISTS is_income BOOLEAN DEFAULT FALSE")
+    except Exception:
+        conn.rollback()
     conn.commit()
     cur.close()
     conn.close()
@@ -531,6 +544,11 @@ class UpcomingBill(BaseModel):
     due_date: str  # YYYY-MM-DD
     recurring_monthly: bool = False
     notes: Optional[str] = None
+    is_income: bool = False  # True => scheduled income (credit) instead of a bill (debit)
+
+
+class ProjectionChatRequest(BaseModel):
+    message: str
 
 
 class PositivePayInquiry(BaseModel):
@@ -2510,6 +2528,349 @@ def apply_bills_to_forecast(forecast: dict) -> dict:
     return adjusted
 
 
+# ==========================================
+# PROJECTION CHAT (natural-language -> upcoming_bills)
+# ==========================================
+
+def _projection_key_figures() -> dict:
+    """Compute ending balance + low point from the bill-adjusted forecast.
+
+    Returns a dict with ending_balance/ending_date and low_point/low_point_date,
+    or empty dict if no forecast is available. Never raises.
+    """
+    try:
+        forecast = apply_bills_to_forecast(get_forecast_from_db())
+        if not forecast:
+            return {}
+        sorted_dates = sorted(forecast.keys())
+        end_date = sorted_dates[-1]
+        low_date = min(sorted_dates, key=lambda d: forecast[d]["balance"])
+        return {
+            "ending_balance": round(float(forecast[end_date]["balance"]), 2),
+            "ending_date": end_date,
+            "low_point": round(float(forecast[low_date]["balance"]), 2),
+            "low_point_date": low_date,
+        }
+    except Exception as e:
+        print(f"key-figures error: {e}")
+        return {}
+
+
+_AMOUNT_RE = re.compile(
+    r"\$?\s*([\d,]+(?:\.\d{1,2})?)\s*(k|m|thousand|million)?",
+    re.IGNORECASE,
+)
+
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10,
+    "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+
+
+def _parse_amount(text: str) -> Optional[float]:
+    """Deterministically extract the first dollar amount. Handles k/m/thousand/million.
+
+    Returns a positive float or None. Skips number tokens that are part of a
+    date (e.g. '7/1', '2026-06-15', 'June 15') and bare 4-digit years so dates
+    don't get mistaken for money. A bare integer is accepted as money.
+    """
+    # Mask out date-shaped substrings so their digits aren't read as money.
+    masked = re.sub(r"\b\d{4}-\d{1,2}-\d{1,2}\b", lambda mo: "#" * len(mo.group(0)), text)
+    masked = re.sub(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b", lambda mo: "#" * len(mo.group(0)), masked)
+    masked = re.sub(
+        r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?\b",
+        lambda mo: "#" * len(mo.group(0)), masked, flags=re.IGNORECASE)
+
+    for m in _AMOUNT_RE.finditer(masked):
+        raw, suffix = m.group(1), (m.group(2) or "").lower()
+        if not raw or set(raw) <= {"#"}:
+            continue
+        has_dollar = "$" in m.group(0) or masked[:m.start()].rstrip().endswith("$")
+        money_marker = has_dollar or bool(suffix) or "," in raw or "." in raw
+        try:
+            val = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        if suffix in ("k", "thousand"):
+            val *= 1_000
+        elif suffix in ("m", "million"):
+            val *= 1_000_000
+        # A bare 4-digit number with no money marker is almost certainly a year.
+        if not money_marker and raw.isdigit() and len(raw) == 4 and 1900 <= val <= 2100:
+            continue
+        if val > 0:
+            return round(val, 2)
+    return None
+
+
+def _parse_date(text: str, base: DateType) -> Optional[str]:
+    """Deterministically extract a future-leaning date as YYYY-MM-DD, else None.
+
+    Supports: 'June 15', 'Jun 15 2026', '6/15', '6/15/2026', '2026-06-15'.
+    For month/day without a year, picks this year, or next year if already past.
+    """
+    t = text.lower()
+    # ISO yyyy-mm-dd
+    m = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", t)
+    if m:
+        try:
+            return DateType(int(m.group(1)), int(m.group(2)), int(m.group(3))).strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+    # Month-name day [year]
+    m = re.search(r"\b([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b", t)
+    if m and m.group(1) in _MONTHS:
+        month = _MONTHS[m.group(1)]
+        day = int(m.group(2))
+        year = int(m.group(3)) if m.group(3) else base.year
+        try:
+            d = DateType(year, month, day)
+        except ValueError:
+            return None
+        if not m.group(3) and d < base:
+            try:
+                d = DateType(year + 1, month, day)
+            except ValueError:
+                return None
+        return d.strftime("%Y-%m-%d")
+    # Numeric m/d[/yyyy]
+    m = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", t)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        if m.group(3):
+            yr = int(m.group(3))
+            year = yr + 2000 if yr < 100 else yr
+        else:
+            year = base.year
+        try:
+            d = DateType(year, month, day)
+        except ValueError:
+            return None
+        if not m.group(3) and d < base:
+            try:
+                d = DateType(year + 1, month, day)
+            except ValueError:
+                return None
+        return d.strftime("%Y-%m-%d")
+    return None
+
+
+def _interpret_projection_message(message: str) -> dict:
+    """Deterministically classify a projection-chat message into a structured intent.
+
+    Returns one of:
+      {"action": "add",    "bill": {name, amount, due_date, recurring_monthly, is_income}}
+      {"action": "remove", "match": "<lowercased name fragment>"}
+      {"action": "ask"}   -> caller should fall back to Q&A
+    Never raises.
+    """
+    text = (message or "").strip()
+    if not text:
+        return {"action": "ask"}
+    t = text.lower()
+
+    # Questions -> Q&A fallback (don't mutate the projection on a question)
+    if t.endswith("?") or t.startswith((
+        "what", "how", "when", "why", "who", "where", "is ", "are ",
+        "do ", "does ", "can ", "will ", "show ", "tell ",
+    )):
+        return {"action": "ask"}
+
+    # Removal intent
+    if any(t.startswith(v) or f" {v} " in f" {t} " for v in ("remove", "delete", "cancel", "drop")):
+        # Strip the verb and trailing 'bill'/'expense'/'payment' noise to get a name fragment
+        frag = re.sub(r"\b(remove|delete|cancel|drop)\b", " ", t)
+        frag = re.sub(r"\b(the|a|an|my|bill|expense|payment|income|deposit)\b", " ", frag)
+        frag = frag.strip(" .,'\"")
+        if frag:
+            return {"action": "remove", "match": frag}
+        return {"action": "ask"}
+
+    amount = _parse_amount(text)
+    if amount is None:
+        # No usable amount -> let Q&A handle it
+        return {"action": "ask"}
+
+    base = today_pacific()
+    due_date = _parse_date(text, base)
+    recurring = bool(re.search(r"\b(monthly|every month|per month|/mo|a month|each month)\b", t))
+
+    # Income vs bill classification (deterministic keyword sets)
+    income_kw = ("deposit", "income", "revenue", "incoming", "receive", "receiving",
+                 "expecting", "expect ", "refund coming", "payment from", "credit", "wire in")
+    bill_kw = ("rent", "bill", "expense", "pay ", "paying", "payroll", "invoice",
+               "owe", "due", "subscription", "loan", "tax", "vendor")
+    is_income = any(k in t for k in income_kw) and not any(
+        k in t for k in ("pay rent", "rent is", "pay the")
+    )
+    # If neither side matched, default to a bill (most projection edits are outflows)
+    if not is_income and not any(k in t for k in bill_kw):
+        is_income = False
+
+    # Build a human-readable name: prefer words around the amount, fallback to first words
+    name = _derive_bill_name(text, is_income)
+
+    # Default date: recurring without a date anchors to today; one-time needs a date.
+    if not due_date:
+        if recurring:
+            due_date = base.strftime("%Y-%m-%d")
+        else:
+            # One-time with no date is ambiguous -> Q&A fallback
+            return {"action": "ask"}
+
+    return {
+        "action": "add",
+        "bill": {
+            "name": name,
+            "amount": amount,
+            "due_date": due_date,
+            "recurring_monthly": recurring,
+            "is_income": is_income,
+        },
+    }
+
+
+def _derive_bill_name(text: str, is_income: bool) -> str:
+    """Pull a short label from the message (strip money/date/filler). Bounded length."""
+    t = text
+    # Remove date tokens FIRST (before money) so 7/1 etc. don't leave stray digits.
+    t = re.sub(r"\b\d{4}-\d{1,2}-\d{1,2}\b", " ", t)
+    t = re.sub(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b", " ", t)
+    t = re.sub(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*\d{0,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b", " ", t, flags=re.IGNORECASE)
+    # Remove money tokens incl. word-suffixes (thousand/million) and k/m.
+    t = re.sub(r"\$?\s*[\d,]+(?:\.\d{1,2})?\s*(thousand|million|k|m)?\b", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(thousand|million)\b", " ", t, flags=re.IGNORECASE)
+    filler = (r"\b(is|are|the|a|an|of|on|for|by|to|will|be|monthly|per|month|each|every|"
+              r"expecting|expect|i'm|im|we|we're|add|new|coming|in|around|about|approximately|"
+              r"costs|cost|it)\b")
+    t = re.sub(filler, " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"[/\\]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip(" .,'\"")
+    if not t:
+        t = "Scheduled Income" if is_income else "Upcoming Bill"
+    # Title-case-ish, bounded length
+    return t[:60].strip().title()
+
+
+@app.post("/projection-chat")
+async def projection_chat(req: ProjectionChatRequest, code: str = Query(...)):
+    """Interpret natural-language NEW INFO and APPLY it to the cash-flow projection.
+
+    - "rent is 5k monthly", "expecting 30k deposit June 15", "remove the rent bill".
+    - Deterministically parses amount/date/recurrence and validates BEFORE applying.
+    - Ambiguous / question input falls back to the existing /ask Q&A (non-mutating).
+    - Returns a short confirmation + updated key figures (ending balance, low point).
+    Non-throwing: degrades to a Q&A answer or a clarification request.
+    """
+    verify_code(code)
+    message = (req.message or "").strip()
+    if not message:
+        return {"type": "answer", "applied": False,
+                "text": "Tell me what changed and I'll update the projection."}
+
+    intent = _interpret_projection_message(message)
+
+    # ---- Q&A fallback (questions / ambiguous) -> reuse existing /ask logic ----
+    if intent["action"] == "ask":
+        try:
+            answer = await ask_question(code=code, question=message)
+        except Exception as e:
+            print(f"projection-chat ask fallback error: {e}")
+            answer = {"type": "answer", "text": "I couldn't interpret that as a projection change."}
+        if isinstance(answer, dict):
+            answer.setdefault("type", "answer")
+            answer["applied"] = False
+        return answer
+
+    # ---- Removal ----
+    if intent["action"] == "remove":
+        frag = intent["match"]
+        bills = get_upcoming_bills_raw()
+        matches = [b for b in bills if frag in (b.get("name") or "").lower()]
+        if not matches:
+            return {"type": "answer", "applied": False,
+                    "text": f"No upcoming bill matching \"{frag}\" to remove."}
+        conn = get_db()
+        if not conn:
+            return {"type": "answer", "applied": False, "text": "Database unavailable; nothing changed."}
+        removed = []
+        try:
+            cur = conn.cursor()
+            for b in matches:
+                cur.execute("DELETE FROM upcoming_bills WHERE id = %s", (b["id"],))
+                removed.append(b.get("name") or f"#{b['id']}")
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return {"type": "answer", "applied": False, "text": f"Couldn't remove that: {e}"}
+        figs = _projection_key_figures()
+        text = f"Removed {', '.join(removed)} from the projection."
+        if figs:
+            text += (f" Ending balance ${figs['ending_balance']:,.0f}, "
+                     f"low point ${figs['low_point']:,.0f} on {figs['low_point_date']}.")
+        return {"type": "answer", "applied": True, "removed": removed,
+                "figures": figs, "text": text}
+
+    # ---- Add (bill or income) ----
+    bill = intent["bill"]
+
+    # VALIDATE before applying
+    errors = []
+    if not bill["name"]:
+        errors.append("missing a label")
+    if not isinstance(bill["amount"], (int, float)) or bill["amount"] <= 0:
+        errors.append("amount must be greater than 0")
+    try:
+        datetime.strptime(bill["due_date"], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        errors.append("date isn't valid")
+    if errors:
+        return {"type": "answer", "applied": False,
+                "text": "I couldn't apply that (" + "; ".join(errors)
+                        + "). Try e.g. \"rent is 5k monthly\" or \"expecting 30k deposit June 15\"."}
+
+    conn = get_db()
+    if not conn:
+        return {"type": "answer", "applied": False, "text": "Database unavailable; nothing changed."}
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            INSERT INTO upcoming_bills (name, amount, due_date, recurring_monthly, notes, is_income)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (bill["name"], abs(bill["amount"]), bill["due_date"],
+              bill["recurring_monthly"],
+              "added via projection chat", bill["is_income"]))
+        new_id = cur.fetchone()["id"]
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return {"type": "answer", "applied": False, "text": f"Couldn't save that: {e}"}
+
+    figs = _projection_key_figures()
+    kind = "income" if bill["is_income"] else "bill"
+    recur = " (monthly)" if bill["recurring_monthly"] else ""
+    text = (f"Added {kind}: {bill['name']} ${bill['amount']:,.0f}{recur} "
+            f"on {bill['due_date']}.")
+    if figs:
+        text += (f" Ending balance now ${figs['ending_balance']:,.0f}; "
+                 f"low point ${figs['low_point']:,.0f} on {figs['low_point_date']}.")
+    return {"type": "answer", "applied": True, "id": new_id,
+            "bill": bill, "figures": figs, "text": text}
+
+
 @app.get("/forecast")
 async def get_forecast(code: str = Query(...)):
     verify_code(code)
@@ -2669,6 +3030,7 @@ async def list_bills(code: str = Query(...)):
             "due_date": due_str,
             "recurring_monthly": bool(b["recurring_monthly"]),
             "notes": b.get("notes") or "",
+            "is_income": bool(b.get("is_income")),
         })
     return {"bills": result}
 
@@ -2692,11 +3054,12 @@ async def create_bill(bill: UpcomingBill, code: str = Query(...)):
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            INSERT INTO upcoming_bills (name, amount, due_date, recurring_monthly, notes)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO upcoming_bills (name, amount, due_date, recurring_monthly, notes, is_income)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (bill.name.strip(), abs(bill.amount), bill.due_date,
-              bill.recurring_monthly, (bill.notes or "").strip() or None))
+              bill.recurring_monthly, (bill.notes or "").strip() or None,
+              bool(bill.is_income)))
         new_id = cur.fetchone()["id"]
         conn.commit()
         cur.close()
