@@ -998,7 +998,11 @@
         .payment-card.type-comms_execs {
             border-left: 4px solid #f59e0b;
         }
-        
+
+        .payment-card.type-bill {
+            border-left: 4px solid #10b981;
+        }
+
         .payment-card-header {
             display: flex;
             justify-content: space-between;
@@ -1310,6 +1314,11 @@
             <button class="quick-btn" onclick="openProjectionModal()">📈 Cash Projection</button>
             <button class="quick-btn" onclick="showPaymentsPage()">📅 Payments</button>
         </div>
+
+        <div class="action-buttons" style="margin-top: 10px;">
+            <button class="action-btn" onclick="showBillsPage()">🧾 Upcoming Bills</button>
+            <button class="action-btn" onclick="showPositivePayPage()">🛡️ Positive Pay</button>
+        </div>
         
         <div class="action-buttons" style="margin-top: 10px;">
             <button class="action-btn" onclick="openUpdateModal()" style="flex: none; width: 100%; background: linear-gradient(135deg, #4CAF50, #45a049);">🔄 Update Bank Transactions</button>
@@ -1488,6 +1497,70 @@ Examples:
             <h1>Upcoming Payments</h1>
         </div>
         <div class="payments-list" id="payments-list"></div>
+    </div>
+
+    <!-- Full-Screen Upcoming Bills Page -->
+    <div id="bills-page" class="projection-page">
+        <div class="proj-header">
+            <button class="back-btn" onclick="closeBillsPage()">← Back</button>
+            <h1>Upcoming Bills</h1>
+        </div>
+
+        <div style="padding: 0 15px 15px;">
+            <p style="color: rgba(255,255,255,0.6); font-size: 13px; margin-bottom: 12px;">
+                Add bills you know are coming so the cash-flow forecast stays accurate. These reduce projected cash on and after the due date.
+            </p>
+            <div style="background: rgba(255,255,255,0.06); border-radius: 12px; padding: 14px; margin-bottom: 18px;">
+                <div style="margin-bottom: 10px;">
+                    <label style="color: rgba(255,255,255,0.8); font-size: 13px; display:block; margin-bottom:4px;">Payee / Name</label>
+                    <input type="text" id="bill-name" placeholder="e.g. Office Lease"
+                        style="width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; font-size: 15px;">
+                </div>
+                <div style="display:flex; gap:10px; margin-bottom: 10px;">
+                    <div style="flex:1;">
+                        <label style="color: rgba(255,255,255,0.8); font-size: 13px; display:block; margin-bottom:4px;">Amount ($)</label>
+                        <input type="number" id="bill-amount" placeholder="5000" min="0" step="0.01"
+                            style="width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; font-size: 15px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="color: rgba(255,255,255,0.8); font-size: 13px; display:block; margin-bottom:4px;">Due Date</label>
+                        <input type="date" id="bill-due"
+                            style="width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; font-size: 15px;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label style="color: rgba(255,255,255,0.8); font-size: 13px; display:block; margin-bottom:4px;">Notes (optional)</label>
+                    <input type="text" id="bill-notes" placeholder="e.g. monthly software"
+                        style="width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; font-size: 15px;">
+                </div>
+                <label style="display:flex; align-items:center; gap:8px; color: rgba(255,255,255,0.8); font-size: 14px; margin-bottom: 12px;">
+                    <input type="checkbox" id="bill-recurring" style="width:18px; height:18px;">
+                    Repeats every month
+                </label>
+                <button onclick="addBill()" style="width:100%; padding: 12px; border-radius: 8px; background: linear-gradient(135deg, #FFB84D, #FF8A65); color: white; border: none; font-weight: 600; font-size: 15px; cursor: pointer;">+ Add Bill</button>
+            </div>
+            <div class="payments-list" id="bills-list"></div>
+        </div>
+    </div>
+
+    <!-- Full-Screen Positive Pay Page -->
+    <div id="positive-pay-page" class="projection-page">
+        <div class="proj-header">
+            <button class="back-btn" onclick="closePositivePayPage()">← Back</button>
+            <h1>Positive Pay</h1>
+        </div>
+        <div style="padding: 0 15px 15px;">
+            <div id="positive-pay-status" style="background: rgba(255,255,255,0.06); border-radius: 12px; padding: 14px; margin-bottom: 18px; color: rgba(255,255,255,0.85); font-size: 14px;">
+                Loading positive pay status...
+            </div>
+            <div style="background: rgba(255,255,255,0.06); border-radius: 12px; padding: 14px; margin-bottom: 18px;">
+                <label style="color: rgba(255,255,255,0.8); font-size: 13px; display:block; margin-bottom:4px;">Ask a question or leave an instruction about positive pay</label>
+                <textarea id="pp-message" placeholder="e.g. Did the positive pay file upload for today's checks?"
+                    style="width: 100%; box-sizing: border-box; min-height: 90px; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; font-size: 15px; margin-bottom: 10px;"></textarea>
+                <button onclick="submitPositivePayInquiry()" style="width:100%; padding: 12px; border-radius: 8px; background: linear-gradient(135deg, #FFB84D, #FF8A65); color: white; border: none; font-weight: 600; font-size: 15px; cursor: pointer;">Submit</button>
+            </div>
+            <div class="payments-list" id="pp-inquiries"></div>
+        </div>
     </div>
 
     <!-- Full-Screen Transactions Page -->
@@ -1887,7 +1960,8 @@ Examples:
                     'amex': 'American Express',
                     'payroll': 'Payroll',
                     'payroll_tax': 'Payroll Taxes',
-                    'comms_execs': 'Comms & Execs'
+                    'comms_execs': 'Comms & Execs',
+                    'bill': 'Upcoming Bill'
                 };
                 
                 let html = '';
@@ -1952,6 +2026,169 @@ Examples:
         
         function closePaymentsPage() {
             document.getElementById('payments-page').classList.remove('active');
+        }
+
+        // Upcoming Bills page functions
+        async function showBillsPage() {
+            document.getElementById('bills-page').classList.add('active');
+            await loadBills();
+        }
+
+        function closeBillsPage() {
+            document.getElementById('bills-page').classList.remove('active');
+        }
+
+        async function loadBills() {
+            const list = document.getElementById('bills-list');
+            list.innerHTML = '<div style="text-align: center; padding: 30px; color: rgba(255,255,255,0.7);">Loading bills...</div>';
+            try {
+                const resp = await fetch(`${API_BASE}/bills?code=${CODE}`);
+                const data = await resp.json();
+                if (!data.bills || data.bills.length === 0) {
+                    list.innerHTML = '<div style="text-align: center; padding: 30px; color: rgba(255,255,255,0.7);">No upcoming bills yet. Add one above.</div>';
+                    return;
+                }
+                const fmt = n => Number(n).toLocaleString(undefined, {maximumFractionDigits: 0});
+                let html = '';
+                for (const b of data.bills) {
+                    const dateObj = new Date(b.due_date + 'T12:00:00');
+                    const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+                    html += `
+                        <div class="payment-card type-bill">
+                            <div class="payment-card-header">
+                                <div>
+                                    <div class="payment-card-type">${b.name}${b.recurring_monthly ? ' 🔁' : ''}</div>
+                                    <div class="payment-card-desc">${b.notes || ''}</div>
+                                </div>
+                                <div class="payment-card-amount"><span class="dollar">$</span><span class="num">${fmt(b.amount)}</span></div>
+                            </div>
+                            <div class="payment-card-body">
+                                <div class="payment-card-date">
+                                    <span class="payment-date-value">📅 ${dateStr}</span>
+                                    ${b.recurring_monthly ? '<span class="payment-days-badge">Monthly</span>' : ''}
+                                </div>
+                                <div style="margin-top:10px; text-align:right;">
+                                    <button onclick="deleteBill(${b.id})" style="padding:6px 12px; background:linear-gradient(135deg,#ff6b6b,#ee5a5a); border:none; border-radius:8px; color:white; font-weight:600; font-size:12px; cursor:pointer;">🗑️ Delete</button>
+                                </div>
+                            </div>
+                        </div>`;
+                }
+                list.innerHTML = html;
+            } catch (err) {
+                list.innerHTML = `<div style="text-align: center; padding: 30px; color: #ffffff;">Error loading bills: ${err.message}</div>`;
+            }
+        }
+
+        async function addBill() {
+            const name = document.getElementById('bill-name').value.trim();
+            const amount = parseFloat(document.getElementById('bill-amount').value);
+            const due = document.getElementById('bill-due').value;
+            const notes = document.getElementById('bill-notes').value.trim();
+            const recurring = document.getElementById('bill-recurring').checked;
+            if (!name) { alert('Please enter a name for the bill.'); return; }
+            if (!amount || amount <= 0) { alert('Please enter an amount greater than 0.'); return; }
+            if (!due) { alert('Please select a due date.'); return; }
+            try {
+                const resp = await fetch(`${API_BASE}/bills?code=${CODE}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, amount, due_date: due, recurring_monthly: recurring, notes })
+                });
+                if (!resp.ok) {
+                    const e = await resp.json().catch(() => ({}));
+                    alert('Could not add bill: ' + (e.detail || resp.status));
+                    return;
+                }
+                document.getElementById('bill-name').value = '';
+                document.getElementById('bill-amount').value = '';
+                document.getElementById('bill-due').value = '';
+                document.getElementById('bill-notes').value = '';
+                document.getElementById('bill-recurring').checked = false;
+                await loadBills();
+            } catch (err) {
+                alert('Error adding bill: ' + err.message);
+            }
+        }
+
+        async function deleteBill(id) {
+            if (!confirm('Delete this bill?')) return;
+            try {
+                const resp = await fetch(`${API_BASE}/bills/${id}?code=${CODE}`, { method: 'DELETE' });
+                if (!resp.ok) {
+                    const e = await resp.json().catch(() => ({}));
+                    alert('Could not delete: ' + (e.detail || resp.status));
+                    return;
+                }
+                await loadBills();
+            } catch (err) {
+                alert('Error deleting bill: ' + err.message);
+            }
+        }
+
+        // Positive Pay page functions
+        async function showPositivePayPage() {
+            document.getElementById('positive-pay-page').classList.add('active');
+            await loadPositivePay();
+        }
+
+        function closePositivePayPage() {
+            document.getElementById('positive-pay-page').classList.remove('active');
+        }
+
+        async function loadPositivePay() {
+            const statusEl = document.getElementById('positive-pay-status');
+            const listEl = document.getElementById('pp-inquiries');
+            statusEl.innerHTML = 'Loading positive pay status...';
+            listEl.innerHTML = '';
+            try {
+                const resp = await fetch(`${API_BASE}/positive-pay-status?code=${CODE}`);
+                const data = await resp.json();
+                if (data.source_connected) {
+                    statusEl.innerHTML = `✅ Positive pay feed connected.${data.last_upload ? ' Last upload: ' + data.last_upload : ''}`;
+                } else {
+                    statusEl.innerHTML = `⚠️ ${data.message || 'No live positive-pay feed connected yet.'}`;
+                }
+                if (data.inquiries && data.inquiries.length) {
+                    let html = '';
+                    for (const q of data.inquiries) {
+                        const when = q.created_at ? new Date(q.created_at).toLocaleString() : '';
+                        html += `
+                            <div class="payment-card type-bill">
+                                <div class="payment-card-header">
+                                    <div>
+                                        <div class="payment-card-desc">${q.message}</div>
+                                        <div style="color:rgba(255,255,255,0.5); font-size:12px; margin-top:4px;">${when}</div>
+                                    </div>
+                                    <div class="payment-card-amount" style="font-size:13px;">${q.status || 'open'}</div>
+                                </div>
+                            </div>`;
+                    }
+                    listEl.innerHTML = html;
+                }
+            } catch (err) {
+                statusEl.innerHTML = 'Error loading positive pay status: ' + err.message;
+            }
+        }
+
+        async function submitPositivePayInquiry() {
+            const msg = document.getElementById('pp-message').value.trim();
+            if (!msg) { alert('Please enter a question or instruction.'); return; }
+            try {
+                const resp = await fetch(`${API_BASE}/positive-pay-inquiry?code=${CODE}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                });
+                if (!resp.ok) {
+                    const e = await resp.json().catch(() => ({}));
+                    alert('Could not submit: ' + (e.detail || resp.status));
+                    return;
+                }
+                document.getElementById('pp-message').value = '';
+                await loadPositivePay();
+            } catch (err) {
+                alert('Error submitting inquiry: ' + err.message);
+            }
         }
         
         // Transaction pagination state
