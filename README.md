@@ -24,3 +24,17 @@ curl -X POST https://your-app.railway.app/ask \
 
 1. Connect this repo to Railway
 2. Railway auto-detects Python and deploys
+
+### Required environment variables
+
+- `ACCESS_CODE` - access code required by protected API endpoints
+- `DATABASE_URL` - PostgreSQL connection URL
+- `WEBHOOK_URL` - webhook URL used for update and fallback requests
+
+Optional:
+
+- `CASAXAI_API_KEY` - enables AI-powered answers
+- `CASAXAI_URL` - CasaXAI API base URL (defaults to `https://ai.casaxai.com`)
+
+Set credentials in the deployment platform's secret/environment-variable settings,
+not in source files. Rotate any credentials previously committed to the repository.

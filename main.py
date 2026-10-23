@@ -32,15 +32,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Access code
-ACCESS_CODE = os.environ.get("ACCESS_CODE", "cflownk")
+# Credentials and integration URLs are supplied at deployment time.
+ACCESS_CODE = os.environ.get("ACCESS_CODE")
 
 # Webhook URL for triggering updates
-WEBHOOK_URL = "https://webhooks.tasklet.ai/v1/public/webhook?token=***REMOVED***"
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # CasaXAI Gateway for AI-powered Q&A
 CASAXAI_URL = os.environ.get("CASAXAI_URL", "https://ai.casaxai.com")
-CASAXAI_API_KEY = os.environ.get("CASAXAI_API_KEY", "***REMOVED***")
+CASAXAI_API_KEY = os.environ.get("CASAXAI_API_KEY")
 
 # Database connection
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -286,6 +286,14 @@ async def startup():
 def verify_code(code: str):
     if code != ACCESS_CODE:
         raise HTTPException(status_code=401, detail="Invalid access code")
+
+
+async def send_webhook(payload: dict):
+    if not WEBHOOK_URL:
+        raise HTTPException(status_code=503, detail="Webhook is not configured")
+    async with httpx.AsyncClient() as client:
+        await client.post(WEBHOOK_URL, json=payload)
+
 
 # Rolling 30-day averages (updated when data is submitted)
 ROLLING_30_DAY = {
@@ -770,12 +778,11 @@ async def submit_data(submission: DataSubmission, code: str = Query(...)):
     
     if not transactions:
         # Fallback: send to webhook for manual processing
-        async with httpx.AsyncClient() as client:
-            await client.post(WEBHOOK_URL, json={
-                "type": "data_submission",
-                "data": submission.data[:5000],
-                "timestamp": now_pacific().isoformat()
-            })
+        await send_webhook({
+            "type": "data_submission",
+            "data": submission.data[:5000],
+            "timestamp": now_pacific().isoformat()
+        })
         return {"status": "queued", "message": "Data sent for processing"}
     
     conn = get_db()
@@ -2483,11 +2490,10 @@ async def ask_question(code: str = Query(...), question: str = Query(...)):
     
     # Refresh/update requests
     if 'refresh' in q or 'update' in q:
-        async with httpx.AsyncClient() as client:
-            await client.post(WEBHOOK_URL, json={
-                "type": "refresh_request",
-                "timestamp": now_pacific().isoformat()
-            })
+        await send_webhook({
+            "type": "refresh_request",
+            "timestamp": now_pacific().isoformat()
+        })
         return {"type": "answer", "text": "Refreshing data from Authorize.Net... Check back in a minute!"}
     
     # Unknown - route to CasaXAI for intelligent response
@@ -2552,23 +2558,21 @@ Be concise and helpful. Use $ amounts with commas."""
             print(f"CasaXAI error: {e}")
     
     # Fallback - send to webhook for manual follow-up
-    async with httpx.AsyncClient() as client:
-        await client.post(WEBHOOK_URL, json={
-            "type": "unknown_question",
-            "question": question,
-            "timestamp": now_pacific().isoformat()
-        })
+    await send_webhook({
+        "type": "unknown_question",
+        "question": question,
+        "timestamp": now_pacific().isoformat()
+    })
     
     return {"type": "answer", "text": "I'll look into that and get back to you!"}
 
 @app.get("/request-update")
 async def request_update(code: str = Query(...)):
     verify_code(code)
-    async with httpx.AsyncClient() as client:
-        await client.post(WEBHOOK_URL, json={
-            "type": "update_request",
-            "timestamp": now_pacific().isoformat()
-        })
+    await send_webhook({
+        "type": "update_request",
+        "timestamp": now_pacific().isoformat()
+    })
     return {"status": "requested", "message": "Update request sent"}
 
 # ==========================================
@@ -3036,5 +3040,4 @@ async def health():
 
 # Mount static files last
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
 
